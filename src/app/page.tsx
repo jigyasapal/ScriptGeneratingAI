@@ -1,8 +1,8 @@
 'use client';
 
 import type { ChangeEvent, FormEvent } from 'react';
-import React, { useState, useTransition, useRef } from 'react';
-import { useFormState } from 'react-dom';
+import React, { useState, useTransition, useRef, useActionState } from 'react';
+// Removed 'useFormState' from 'react-dom' import, added 'useActionState' from 'react'
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,7 +19,8 @@ export default function Home() {
   const formRef = useRef<HTMLFormElement>(null);
 
   const initialState: GenerateScriptActionState = {};
-  const [state, formAction] = useFormState(generateScriptAction, initialState);
+  // Replaced useFormState with useActionState
+  const [state, formAction, isFormPending] = useActionState(generateScriptAction, initialState);
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     setKeyword(e.target.value);
@@ -28,6 +29,7 @@ export default function Home() {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    // Use startTransition with formAction directly if needed, or rely on isFormPending from useActionState
     startTransition(() => {
       formAction(formData);
     });
@@ -53,6 +55,9 @@ export default function Home() {
     }
   };
 
+  // Combine local isPending with form pending state if necessary, or just use isFormPending
+  const isLoading = isPending || isFormPending;
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-4 md:p-24 bg-background">
       <Card className="w-full max-w-2xl shadow-lg">
@@ -74,16 +79,16 @@ export default function Home() {
                 onChange={handleInputChange}
                 required
                 className="text-base"
-                disabled={isPending}
+                disabled={isLoading}
               />
               {state.error && <p className="text-sm text-destructive">{state.error}</p>}
             </div>
             <Button
               type="submit"
               className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
-              disabled={isPending || !keyword}
+              disabled={isLoading || !keyword}
             >
-              {isPending ? (
+              {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Generating...
