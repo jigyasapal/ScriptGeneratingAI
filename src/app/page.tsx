@@ -1,7 +1,8 @@
 'use client';
 
 import type {ChangeEvent, FormEvent} from 'react';
-import React, {useState, useTransition, useRef, useActionState, useEffect} from 'react';
+import React, {useState, useTransition, useRef, useEffect} from 'react';
+import { useActionState } from 'react';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
@@ -36,7 +37,7 @@ export default function Home() {
     const loadMusic = async () => {
       try {
         // Check if AudioContext is supported
-        if (!window.AudioContext && !window.webkitAudioContext) {
+        if (!window.AudioContext && !(window as any).webkitAudioContext) {
            console.warn('Web Audio API is not supported in this browser.');
            toast({ variant: "destructive", title: "Audio Error", description: "Background music requires a modern browser." });
            return;
@@ -56,7 +57,7 @@ export default function Home() {
         const arrayBuffer = await response.arrayBuffer();
 
         // Create a *temporary* context just for decoding, as the main one should be created on user interaction
-        const tempAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const tempAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         console.log('Decoding audio data...');
         audioBufferRef.current = await tempAudioContext.decodeAudioData(arrayBuffer);
         await tempAudioContext.close(); // Close the temporary context
@@ -111,6 +112,10 @@ export default function Home() {
       }
       audioSourceRef.current = null;
     }
+     if (gainNodeRef.current) {
+        gainNodeRef.current.disconnect();
+        gainNodeRef.current = null;
+     }
     // Don't close the context here, reuse it
     // if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
     //   audioContextRef.current.close().catch(console.error);
@@ -183,7 +188,7 @@ export default function Home() {
         // Create AudioContext on user interaction if needed
         if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
           console.log('Creating new AudioContext...');
-          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
           if(!AudioContext) throw new Error("Web Audio API not supported");
           audioContextRef.current = new AudioContext();
         }
@@ -250,28 +255,55 @@ export default function Home() {
         const utterance = new SpeechSynthesisUtterance(state.script);
         utteranceRef.current = utterance; // Store utterance ref
 
-        // Get available voices
-        const voices = speechSynthesis.getVoices();
-         // If voices are not loaded yet, wait for them (async loading issue)
-        if (voices.length === 0 && 'onvoiceschanged' in speechSynthesis) {
-            console.log('Voices not loaded yet, waiting for onvoiceschanged event...');
-            speechSynthesis.onvoiceschanged = () => {
-                console.log('Voices loaded, retrying read aloud...');
-                // Remove listener *before* retrying to avoid infinite loop on some browsers
-                speechSynthesis.onvoiceschanged = null;
-                handleReadAloud(); // Retry after voices load
-            };
-            // Need to clean up audio if we exit here temporarily
-            if(audioSourceRef.current) {
-                 try {
-                     audioSourceRef.current.stop();
-                     audioSourceRef.current.disconnect();
-                 } catch (e) { console.warn("Error stopping audio source while waiting for voices:", e); }
-                 audioSourceRef.current = null;
-            }
-            return; // Exit for now, will retry
-        }
+        // Event Handlers for Speech Synthesis
+        utterance.onstart = () => {
+          console.log('Speech started.');
+          setIsReading(true); // Set reading state *after* speech actually starts
+        };
 
+        utterance.onend = () => {
+          console.log('Speech finished.');
+          // Keep music playing - user stops manually.
+          setIsReading(false); // Only mark speech as finished
+          utteranceRef.current = null;
+          // If you want music to stop when speech ends, uncomment:
+          // stopAudioPlayback();
+        };
+
+        utterance.onerror = (event) => {
+          // Log the specific error object if available
+          const errorMsg = event.error || 'Unknown speech error';
+          console.error('SpeechSynthesisUtterance.onerror:', errorMsg, event);
+          toast({
+            variant: 'destructive',
+            title: 'Speech Error',
+            description: `Could not read the script aloud: ${errorMsg}`,
+          });
+          stopAudioPlayback(); // Cleanup on speech error
+        };
+
+
+        // Get available voices asynchronously
+        const getVoices = (): Promise<SpeechSynthesisVoice[]> => {
+            return new Promise((resolve) => {
+                let voices = speechSynthesis.getVoices();
+                if (voices.length > 0) {
+                    resolve(voices);
+                } else if ('onvoiceschanged' in speechSynthesis) {
+                    speechSynthesis.onvoiceschanged = () => {
+                        voices = speechSynthesis.getVoices();
+                        speechSynthesis.onvoiceschanged = null; // Remove listener
+                        resolve(voices);
+                    };
+                } else {
+                    resolve([]); // No support for onvoiceschanged
+                }
+            });
+        };
+
+
+        const voices = await getVoices();
+        console.log('Available voices:', voices.length);
 
         // Attempt to select a suitable voice (example: English, non-local)
         let preferredVoice = voices.find(voice => voice.lang.startsWith('en') && !voice.localService && voice.name.includes('Google')); // Prioritize Google voices
@@ -289,30 +321,6 @@ export default function Home() {
         // utterance.pitch = 1.1; // Slightly higher pitch
         // utterance.rate = 0.95; // Slightly slower rate
 
-        // Event Handlers for Speech Synthesis
-        utterance.onstart = () => {
-          console.log('Speech started.');
-          setIsReading(true); // Set reading state *after* speech actually starts
-        };
-
-        utterance.onend = () => {
-          console.log('Speech finished.');
-          // Keep music playing - user stops manually.
-          setIsReading(false); // Only mark speech as finished
-          utteranceRef.current = null;
-          // If you want music to stop when speech ends, uncomment:
-          // stopAudioPlayback();
-        };
-
-        utterance.onerror = (event) => {
-          console.error('SpeechSynthesisUtterance.onerror', event.error);
-          toast({
-            variant: 'destructive',
-            title: 'Speech Error',
-            description: `Could not read the script aloud: ${event.error || 'Unknown error'}`,
-          });
-          stopAudioPlayback(); // Cleanup on speech error
-        };
 
         // Start speech
         console.log('Speaking utterance...');
