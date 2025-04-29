@@ -39,7 +39,13 @@ const prompt = ai.definePrompt({
   },
   prompt: `You are a podcast script writer tasked with creating engaging content. Generate a full podcast script based on the following keyword. The script should include a compelling introduction, informative main content segments, and a clear conclusion.
 
-IMPORTANT INSTRUCTIONS FOR OUTPUT:
+**Tone and Style:**
+*   Adopt a **conversational and engaging human tone**. Write as if a real person is speaking naturally to an audience.
+*   Use language that is accessible and easy to understand, avoiding overly robotic or formal phrasing.
+*   Feel free to use contractions (like "don't", "it's", "we're") where appropriate for a natural flow.
+*   Aim for a style that is informative yet captivating, making the listener feel involved.
+
+**IMPORTANT INSTRUCTIONS FOR OUTPUT:**
 1.  **Spoken Words Only:** The output script MUST contain ONLY the words intended to be spoken aloud by the podcast host.
 2.  **No Extra Elements:** Absolutely DO NOT include any of the following:
     *   Speaker names (e.g., "Host:", "Guest:")
@@ -50,11 +56,11 @@ IMPORTANT INSTRUCTIONS FOR OUTPUT:
     *   Any other non-spoken text.
 3.  **Formatting:** Use paragraphs to structure the script for readability. Ensure line breaks occur naturally within the spoken dialogue.
 
-Think of the output as something that will be fed directly into a text-to-speech engine. Only the audible words should be present.
+Think of the output as something that will be fed directly into a text-to-speech engine. Only the audible words should be present, written in a natural, human-like speaking style.
 
 Keyword: {{{keyword}}}
 
-Generate the podcast script now, adhering strictly to the output instructions.`,
+Generate the podcast script now, adhering strictly to the tone and output instructions.`,
 });
 
 
@@ -84,7 +90,7 @@ const generatePodcastScriptFlow = ai.defineFlow<
         // Check for common patterns indicating non-spoken content
         if (trimmedLine.startsWith('[') && trimmedLine.endsWith(']')) return false; // [SOUND EFFECT]
         if (trimmedLine.startsWith('(') && trimmedLine.endsWith(')')) return false; // (Whispering)
-        if (/^(Host|Speaker|Intro|Outro|Music|Guest)\s*:/i.test(trimmedLine)) return false; // Speaker: Blah
+        if (/^(Host|Speaker|Intro|Outro|Music|Guest|Narrator)\s*:/i.test(trimmedLine)) return false; // Speaker: Blah
         if (trimmedLine.startsWith('//')) return false; // // Comment
         if (trimmedLine.startsWith('<!--') && trimmedLine.endsWith('-->')) return false; // HTML comment
         if (/^\[\d{2}:\d{2}(:\d{2})?\]$/.test(trimmedLine)) return false; // [00:30] or [00:30:15]
