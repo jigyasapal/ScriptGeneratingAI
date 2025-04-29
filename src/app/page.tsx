@@ -19,12 +19,6 @@ export default function Home() {
   const [isReading, setIsReading] = useState(false);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-  // Refs for Web Audio API
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const musicSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
-  const audioBufferRef = useRef<AudioBuffer | null>(null); // Cache decoded audio buffer
-
   const initialState: GenerateScriptActionState = {};
   const [state, formAction, isFormPending] = useActionState(generateScriptAction, initialState);
 
@@ -33,61 +27,23 @@ export default function Home() {
     if (speechSynthesis.speaking) {
       speechSynthesis.cancel();
     }
-    if (musicSourceRef.current) {
-      try {
-        musicSourceRef.current.stop();
-      } catch (e) {
-        // Ignore errors if already stopped or context closed
-      }
-      musicSourceRef.current.disconnect();
-      musicSourceRef.current = null;
-    }
-    if (gainNodeRef.current) {
-      gainNodeRef.current.disconnect();
-      gainNodeRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(console.error); // Close context
-      audioContextRef.current = null;
-    }
     setIsReading(false);
-    utteranceRef.current = null;
+    utteranceRef.current = null; // Clear ref when stopping
   };
 
-  // Load background music
+  // Cleanup speech synthesis on component unmount
   useEffect(() => {
-    const loadMusic = async () => {
-      try {
-        // NOTE: Replace with an actual path to your music file
-        // We cannot add binary files, so this is a placeholder path.
-        // Ensure you have a `public/background-music.mp3` file.
-        const response = await fetch('/background-music.mp3');
-        if (!response.ok) throw new Error('Music file not found');
-        const arrayBuffer = await response.arrayBuffer();
-        const tempAudioContext = new AudioContext(); // Use temporary context for decoding
-        audioBufferRef.current = await tempAudioContext.decodeAudioData(arrayBuffer);
-        tempAudioContext.close(); // Close temporary context
-        console.log('Background music loaded successfully.');
-      } catch (error) {
-        console.error('Failed to load background music:', error);
-        // Optionally notify user that music won't play
-        // toast({ variant: 'destructive', title: 'Audio Error', description: 'Could not load background music.' });
-      }
-    };
-    loadMusic();
-
-    // Cleanup function
     return () => {
-      stopAudioPlayback(); // Ensure everything stops on unmount
+      stopAudioPlayback();
     };
      // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Load music once on mount
+  }, []);
 
-  // Stop audio if script changes
+  // Stop audio if script changes or component unmounts
   useEffect(() => {
     stopAudioPlayback();
      // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.script]);
+  }, [state.script]); // Dependency on state.script ensures playback stops if a new script is generated
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     setKeyword(e.target.value);
@@ -95,7 +51,7 @@ export default function Home() {
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    stopAudioPlayback(); // Stop any ongoing playback
+    stopAudioPlayback(); // Stop any ongoing playback before generating new script
     const formData = new FormData(event.currentTarget);
     startTransition(() => {
       formAction(formData);
@@ -123,11 +79,11 @@ export default function Home() {
   };
 
   const handleReadAloud = () => {
-    if (!state.script || !('speechSynthesis' in window) || !('AudioContext' in window)) {
+    if (!state.script || !('speechSynthesis' in window)) {
       toast({
         variant: 'destructive',
         title: 'Error',
-        description: 'Text-to-speech or Web Audio is not supported, or no script available.',
+        description: 'Text-to-speech is not supported, or no script available.',
       });
       return;
     }
@@ -137,35 +93,22 @@ export default function Home() {
     } else {
       // Start reading
       try {
-        // --- Initialize Audio Context and Nodes ---
-        if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-          audioContextRef.current = new AudioContext();
-        }
-        const audioCtx = audioContextRef.current;
-
-        // Create Gain Node for volume control
-        gainNodeRef.current = audioCtx.createGain();
-        gainNodeRef.current.gain.setValueAtTime(0.15, audioCtx.currentTime); // Lower volume for background music
-        gainNodeRef.current.connect(audioCtx.destination);
-
-        // Create and play music source if buffer is loaded
-        if (audioBufferRef.current) {
-          musicSourceRef.current = audioCtx.createBufferSource();
-          musicSourceRef.current.buffer = audioBufferRef.current;
-          musicSourceRef.current.loop = true;
-          musicSourceRef.current.connect(gainNodeRef.current);
-          musicSourceRef.current.start(0);
-        } else {
-          console.warn('Audio buffer not ready, music will not play.');
-          // Optionally inform user music isn't ready
-        }
-
         // --- Initialize Speech Synthesis ---
         const utterance = new SpeechSynthesisUtterance(state.script);
-        utteranceRef.current = utterance;
+        utteranceRef.current = utterance; // Store utterance ref
 
         // Attempt to select a suitable voice (example: English, non-local)
         const voices = speechSynthesis.getVoices();
+        // Ensure voices are loaded (sometimes they load async)
+        if (voices.length === 0) {
+             // Wait for voices to load - common issue
+            speechSynthesis.onvoiceschanged = () => {
+                handleReadAloud(); // Retry after voices load
+                speechSynthesis.onvoiceschanged = null; // Remove listener after first call
+            };
+            return; // Exit for now, will retry
+        }
+
         let preferredVoice = voices.find(voice => voice.lang.startsWith('en') && !voice.localService);
         if (!preferredVoice) {
            preferredVoice = voices.find(voice => voice.lang.startsWith('en')); // Fallback to any English voice
@@ -181,10 +124,14 @@ export default function Home() {
         // utterance.pitch = 1.1; // Slightly higher pitch
         // utterance.rate = 0.95; // Slightly slower rate
 
+        utterance.onstart = () => {
+            console.log('Speech started.');
+            setIsReading(true);
+        };
 
         utterance.onend = () => {
           console.log('Speech has finished.');
-          stopAudioPlayback(); // Stop music and cleanup when speech ends naturally
+          stopAudioPlayback(); // Cleanup when speech ends naturally
         };
 
         utterance.onerror = (event) => {
@@ -192,21 +139,21 @@ export default function Home() {
           toast({
             variant: 'destructive',
             title: 'Speech Error',
-            description: `Could not read the script aloud: ${event.error}`,
+            description: `Could not read the script aloud: ${event.error || 'Unknown error'}`,
           });
-          stopAudioPlayback(); // Stop music and cleanup on error
+          stopAudioPlayback(); // Cleanup on error
         };
 
         // Start speech
         speechSynthesis.speak(utterance);
-        setIsReading(true);
+        // Note: setIsReading(true) is now called in onstart handler
 
       } catch (error) {
-        console.error('Error setting up audio playback:', error);
+        console.error('Error setting up speech synthesis:', error);
         toast({
           variant: 'destructive',
-          title: 'Audio Setup Error',
-          description: 'Failed to initialize audio playback.',
+          title: 'Speech Setup Error',
+          description: 'Failed to initialize text-to-speech.',
         });
         stopAudioPlayback(); // Cleanup if setup fails
       }
@@ -264,7 +211,7 @@ export default function Home() {
                   id="script"
                   value={state.script}
                   readOnly
-                  className="min-h-[300px] text-base leading-relaxed bg-secondary whitespace-pre-wrap" // Added whitespace-pre-wrap
+                  className="min-h-[300px] text-base bg-secondary" // Removed whitespace-pre-wrap from here, added it to component definition
                   aria-label="Generated podcast script"
                 />
                 <div className="absolute top-2 right-2 flex space-x-1">
@@ -274,8 +221,8 @@ export default function Home() {
                     className="text-muted-foreground hover:text-foreground"
                     onClick={handleReadAloud}
                     aria-label={isReading ? "Stop reading script" : "Read script aloud"}
-                    disabled={isLoading || (!audioBufferRef.current && !isReading)} // Disable if music isn't loaded (unless already playing)
-                    title={!audioBufferRef.current ? "Background music loading..." : (isReading ? "Stop Playback" : "Play with Music")}
+                    disabled={isLoading} // Only disable if loading
+                    title={isReading ? "Stop Playback" : "Read Aloud"}
                   >
                     {isReading ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                   </Button>
