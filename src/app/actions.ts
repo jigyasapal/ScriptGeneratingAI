@@ -35,6 +35,8 @@ export async function generateScriptAction(
     return { script: result.script };
   } catch (error) {
     console.error('Error generating podcast script:', error);
-    return { error: 'Failed to generate script. Please try again.' };
+    // Return the specific error message from the flow if available, otherwise a generic one.
+    const errorMessage = error instanceof Error ? error.message : 'Failed to generate script. Please try again.';
+    return { error: errorMessage };
   }
 }

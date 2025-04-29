@@ -12,12 +12,12 @@ import {ai} from '@/ai/ai-instance';
 import {z} from 'genkit';
 
 const GeneratePodcastScriptInputSchema = z.object({
-  keyword: z.string().describe('The keyword for the podcast script.'),
+  keyword: z.string().describe('The keyword for the podcast script topic.'),
 });
 export type GeneratePodcastScriptInput = z.infer<typeof GeneratePodcastScriptInputSchema>;
 
 const GeneratePodcastScriptOutputSchema = z.object({
-  script: z.string().describe('The generated podcast script, containing only the spoken words suitable for text-to-speech.'),
+  script: z.string().describe('The generated podcast script, containing ONLY the words meant to be spoken aloud by a host. Do NOT include any stage directions, speaker names, sound effect cues, comments, titles, introductions like "Podcast Script:", or any other non-spoken text. The output should be directly usable for text-to-speech synthesis.'),
 });
 export type GeneratePodcastScriptOutput = z.infer<typeof GeneratePodcastScriptOutputSchema>;
 
@@ -28,39 +28,36 @@ export async function generatePodcastScript(input: GeneratePodcastScriptInput): 
 const prompt = ai.definePrompt({
   name: 'podcastScriptPrompt',
   input: {
-    schema: z.object({
-      keyword: z.string().describe('The keyword for the podcast script.'),
-    }),
+    schema: GeneratePodcastScriptInputSchema,
   },
   output: {
-    schema: z.object({
-      script: z.string().describe('The generated podcast script, containing ONLY the words meant to be spoken aloud by a host. Do NOT include any stage directions, speaker names, sound effect cues, comments, or any other non-spoken text. Format the script with paragraphs for readability, but ensure only the spoken dialogue is present.'),
-    }),
+    schema: GeneratePodcastScriptOutputSchema,
   },
-  prompt: `You are a podcast script writer tasked with creating engaging content. Generate a full podcast script based on the following keyword. The script should include a compelling introduction, informative main content segments, and a clear conclusion.
+  prompt: `You are a podcast script writer tasked with creating engaging content. Generate a full podcast script based on the provided keyword. The script should flow naturally like spoken conversation.
+
+**Keyword:** {{{keyword}}}
 
 **Tone and Style:**
 *   Adopt a **conversational and engaging human tone**. Write as if a real person is speaking naturally to an audience.
 *   Use language that is accessible and easy to understand, avoiding overly robotic or formal phrasing.
-*   Feel free to use contractions (like "don't", "it's", "we're") where appropriate for a natural flow.
+*   Incorporate natural pauses and rhythms of speech through punctuation and sentence structure.
+*   Use contractions (like "don't", "it's", "we're") where appropriate for a natural flow.
 *   Aim for a style that is informative yet captivating, making the listener feel involved.
 
-**IMPORTANT INSTRUCTIONS FOR OUTPUT:**
-1.  **Spoken Words Only:** The output script MUST contain ONLY the words intended to be spoken aloud by the podcast host.
-2.  **No Extra Elements:** Absolutely DO NOT include any of the following:
+**CRITICAL OUTPUT INSTRUCTIONS:**
+1.  **Spoken Words ONLY:** The output MUST contain ONLY the words intended to be spoken aloud by the podcast host. This output will be fed directly into a text-to-speech (TTS) engine.
+2.  **ABSOLUTELY NO Extra Elements:** Do NOT include any of the following:
     *   Speaker names (e.g., "Host:", "Guest:")
     *   Stage directions (e.g., "[upbeat music fades]", "(pauses briefly)", "[sound of typing]")
     *   Sound effect cues (e.g., "[SFX: door creaks]")
+    *   Titles or headings (e.g., "Podcast Script:", "Introduction", "Section 1")
     *   Comments or notes (e.g., "// Remember to emphasize this", "<!-- Check source -->")
     *   Timestamps or section markers (e.g., "[00:30]", "== Section 2 ==")
+    *   Any introductory or concluding remarks *about* the script itself (e.g., "Here is the script:", "End of script.")
     *   Any other non-spoken text.
 3.  **Formatting:** Use paragraphs to structure the script for readability. Ensure line breaks occur naturally within the spoken dialogue.
 
-Think of the output as something that will be fed directly into a text-to-speech engine. Only the audible words should be present, written in a natural, human-like speaking style.
-
-Keyword: {{{keyword}}}
-
-Generate the podcast script now, adhering strictly to the tone and output instructions.`,
+Generate the podcast script now, adhering strictly to the tone and **CRITICAL OUTPUT INSTRUCTIONS**. The entire output should be only the spoken words.`,
 });
 
 
@@ -74,42 +71,37 @@ const generatePodcastScriptFlow = ai.defineFlow<
     outputSchema: GeneratePodcastScriptOutputSchema,
   },
   async input => {
-    const {output} = await prompt(input);
-    // Ensure output exists and contains the script field
-    if (!output || typeof output.script !== 'string') {
-        console.error("AI output validation failed:", output);
-        throw new Error("AI failed to generate a valid script. The output was empty or not in the expected format.");
-    }
-    // Basic filtering for common non-spoken patterns just in case the LLM doesn't follow instructions perfectly.
-    let cleanedScript = output.script;
-    console.log("Raw AI Script Output:\n", cleanedScript);
+    console.log(`Generating script for keyword: ${input.keyword}`);
+    try {
+        const {output} = await prompt(input);
 
-    // Remove lines likely containing only non-spoken elements (more robust)
-    cleanedScript = cleanedScript.split('\n').filter(line => {
-        const trimmedLine = line.trim();
-        // Check for common patterns indicating non-spoken content
-        if (trimmedLine.startsWith('[') && trimmedLine.endsWith(']')) return false; // [SOUND EFFECT]
-        if (trimmedLine.startsWith('(') && trimmedLine.endsWith(')')) return false; // (Whispering)
-        if (/^(Host|Speaker|Intro|Outro|Music|Guest|Narrator)\s*:/i.test(trimmedLine)) return false; // Speaker: Blah
-        if (trimmedLine.startsWith('//')) return false; // // Comment
-        if (trimmedLine.startsWith('<!--') && trimmedLine.endsWith('-->')) return false; // HTML comment
-        if (/^\[\d{2}:\d{2}(:\d{2})?\]$/.test(trimmedLine)) return false; // [00:30] or [00:30:15]
-        if (/^==.*==$/.test(trimmedLine)) return false; // == Section ==
-        if (trimmedLine === '') return true; // Keep empty lines for paragraph breaks if desired, or filter if not
-        return true; // Keep lines that don't match the filters
-    }).join('\n');
+        // Genkit/Google AI SDK should handle schema validation based on outputSchema.
+        // We just need to ensure the output exists.
+        if (!output?.script) {
+            console.error("AI output validation failed: Output or script field is missing.", output);
+            throw new Error("AI failed to generate a valid script. The output was empty or malformed.");
+        }
 
-    // Trim leading/trailing whitespace from the final script
-    cleanedScript = cleanedScript.trim();
+        // Basic trim, but rely on the prompt/schema for core formatting.
+        const finalScript = output.script.trim();
 
-    console.log("Cleaned Script Output:\n", cleanedScript);
+        if (!finalScript) {
+             console.error("Script became empty after trimming. Original AI output:", output.script);
+            throw new Error("AI generated an empty script. Please try a different keyword.");
+        }
 
-     if (!cleanedScript) {
-        console.error("Script became empty after cleaning. Original AI output:", output.script);
-        throw new Error("AI generated a script, but it was filtered out entirely. Please try a different keyword or check the AI prompt instructions.");
+        console.log("Successfully generated script (first 100 chars):", finalScript.substring(0, 100) + "...");
+        return { script: finalScript };
+
+    } catch(error) {
+        console.error(`Error in generatePodcastScriptFlow for keyword "${input.keyword}":`, error);
+        // Re-throw a more user-friendly error or let the calling action handle it.
+        // Avoid exposing internal error details directly if possible.
+        if (error instanceof Error && error.message.includes("blocked")) {
+             throw new Error("Script generation failed due to content safety filters. Please try a different keyword.");
+        }
+         throw new Error("An unexpected error occurred while generating the script.");
     }
 
-
-    return { script: cleanedScript };
   }
 );
