@@ -3,7 +3,7 @@
 /**
  * @fileOverview Podcast script generation flow.
  *
- * - generatePodcastScript - A function that generates a podcast script based on a keyword.
+ * - generatePodcastScript - A function that generates a podcast script based on a keyword and desired length.
  * - GeneratePodcastScriptInput - The input type for the generatePodcastScript function.
  * - GeneratePodcastScriptOutput - The return type for the generatePodcastScript function.
  */
@@ -11,8 +11,13 @@
 import {ai} from '@/ai/ai-instance';
 import {z} from 'genkit';
 
+// Define the possible script lengths
+const ScriptLengthEnum = z.enum(['short', 'medium', 'long']);
+export type ScriptLength = z.infer<typeof ScriptLengthEnum>;
+
 const GeneratePodcastScriptInputSchema = z.object({
   keyword: z.string().describe('The keyword for the podcast script topic.'),
+  length: ScriptLengthEnum.default('medium').describe('The desired length of the podcast script (short: ~1-2 mins, medium: ~3-5 mins, long: ~6-8 mins).'),
 });
 export type GeneratePodcastScriptInput = z.infer<typeof GeneratePodcastScriptInputSchema>;
 
@@ -22,7 +27,9 @@ const GeneratePodcastScriptOutputSchema = z.object({
 export type GeneratePodcastScriptOutput = z.infer<typeof GeneratePodcastScriptOutputSchema>;
 
 export async function generatePodcastScript(input: GeneratePodcastScriptInput): Promise<GeneratePodcastScriptOutput> {
-  return generatePodcastScriptFlow(input);
+  // Ensure length is provided, defaulting if necessary
+  const validatedInput = GeneratePodcastScriptInputSchema.parse(input);
+  return generatePodcastScriptFlow(validatedInput);
 }
 
 const prompt = ai.definePrompt({
@@ -33,9 +40,10 @@ const prompt = ai.definePrompt({
   output: {
     schema: GeneratePodcastScriptOutputSchema,
   },
-  prompt: `You are a podcast script writer tasked with creating engaging content. Generate a full podcast script based on the provided keyword. The script should flow naturally like spoken conversation.
+  prompt: `You are a podcast script writer tasked with creating engaging content. Generate a full podcast script based on the provided keyword and desired length. The script should include an introduction, main content sections, and a conclusion, flowing naturally like spoken conversation.
 
 **Keyword:** {{{keyword}}}
+**Desired Length:** {{{length}}} (Interpret this as: short ≈ 1-2 minutes speaking time, medium ≈ 3-5 minutes, long ≈ 6-8 minutes). Adjust the depth of content, number of examples, and overall detail accordingly.
 
 **Tone and Style:**
 *   Adopt a **conversational and engaging human tone**. Write as if a real person is speaking naturally to an audience.
@@ -57,7 +65,7 @@ const prompt = ai.definePrompt({
     *   Any other non-spoken text.
 3.  **Formatting:** Use paragraphs to structure the script for readability. Ensure line breaks occur naturally within the spoken dialogue.
 
-Generate the podcast script now, adhering strictly to the tone and **CRITICAL OUTPUT INSTRUCTIONS**. The entire output should be only the spoken words.`,
+Generate the podcast script now, adhering strictly to the tone, length guidance, and **CRITICAL OUTPUT INSTRUCTIONS**. The entire output should be only the spoken words.`,
 });
 
 
@@ -71,7 +79,7 @@ const generatePodcastScriptFlow = ai.defineFlow<
     outputSchema: GeneratePodcastScriptOutputSchema,
   },
   async input => {
-    console.log(`Generating script for keyword: ${input.keyword}`);
+    console.log(`Generating script for keyword: "${input.keyword}", length: ${input.length}`);
     try {
         const {output} = await prompt(input);
 
@@ -90,18 +98,17 @@ const generatePodcastScriptFlow = ai.defineFlow<
             throw new Error("AI generated an empty script. Please try a different keyword.");
         }
 
-        console.log("Successfully generated script (first 100 chars):", finalScript.substring(0, 100) + "...");
+        console.log(`Successfully generated ${input.length} script (first 100 chars):`, finalScript.substring(0, 100) + "...");
         return { script: finalScript };
 
     } catch(error) {
-        console.error(`Error in generatePodcastScriptFlow for keyword "${input.keyword}":`, error);
+        console.error(`Error in generatePodcastScriptFlow for keyword "${input.keyword}", length "${input.length}":`, error);
         // Re-throw a more user-friendly error or let the calling action handle it.
         // Avoid exposing internal error details directly if possible.
         if (error instanceof Error && error.message.includes("blocked")) {
-             throw new Error("Script generation failed due to content safety filters. Please try a different keyword.");
+             throw new Error("Script generation failed due to content safety filters. Please try a different keyword or length.");
         }
          throw new Error("An unexpected error occurred while generating the script.");
     }
-
   }
 );
