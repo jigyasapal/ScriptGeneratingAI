@@ -17,7 +17,7 @@ const GeneratePodcastScriptInputSchema = z.object({
 export type GeneratePodcastScriptInput = z.infer<typeof GeneratePodcastScriptInputSchema>;
 
 const GeneratePodcastScriptOutputSchema = z.object({
-  script: z.string().describe('The generated podcast script, containing only the spoken words.'),
+  script: z.string().describe('The generated podcast script, containing only the spoken words suitable for text-to-speech.'),
 });
 export type GeneratePodcastScriptOutput = z.infer<typeof GeneratePodcastScriptOutputSchema>;
 
@@ -34,15 +34,29 @@ const prompt = ai.definePrompt({
   },
   output: {
     schema: z.object({
-      script: z.string().describe('The generated podcast script, containing only the spoken words suitable for text-to-speech.'),
+      script: z.string().describe('The generated podcast script, containing ONLY the words meant to be spoken aloud by a host. Do NOT include any stage directions, speaker names, sound effect cues, comments, or any other non-spoken text. Format the script with paragraphs for readability, but ensure only the spoken dialogue is present.'),
     }),
   },
-  prompt: `You are a podcast script writer. Generate a full podcast script based on the following keyword, including introduction, main content, and conclusion.
+  prompt: `You are a podcast script writer tasked with creating engaging content. Generate a full podcast script based on the following keyword. The script should include a compelling introduction, informative main content segments, and a clear conclusion.
 
-IMPORTANT: The output script should contain ONLY the words meant to be spoken aloud by a host. Do NOT include any stage directions, speaker names, sound effect cues, comments, or any other non-spoken text. Format the script with paragraphs for readability, but ensure only the spoken dialogue is present.
+IMPORTANT INSTRUCTIONS FOR OUTPUT:
+1.  **Spoken Words Only:** The output script MUST contain ONLY the words intended to be spoken aloud by the podcast host.
+2.  **No Extra Elements:** Absolutely DO NOT include any of the following:
+    *   Speaker names (e.g., "Host:", "Guest:")
+    *   Stage directions (e.g., "[upbeat music fades]", "(pauses briefly)", "[sound of typing]")
+    *   Sound effect cues (e.g., "[SFX: door creaks]")
+    *   Comments or notes (e.g., "// Remember to emphasize this", "<!-- Check source -->")
+    *   Timestamps or section markers (e.g., "[00:30]", "== Section 2 ==")
+    *   Any other non-spoken text.
+3.  **Formatting:** Use paragraphs to structure the script for readability. Ensure line breaks occur naturally within the spoken dialogue.
 
-Keyword: {{{keyword}}}`,
+Think of the output as something that will be fed directly into a text-to-speech engine. Only the audible words should be present.
+
+Keyword: {{{keyword}}}
+
+Generate the podcast script now, adhering strictly to the output instructions.`,
 });
+
 
 const generatePodcastScriptFlow = ai.defineFlow<
   typeof GeneratePodcastScriptInputSchema,
@@ -57,16 +71,38 @@ const generatePodcastScriptFlow = ai.defineFlow<
     const {output} = await prompt(input);
     // Ensure output exists and contains the script field
     if (!output || typeof output.script !== 'string') {
-        throw new Error("AI failed to generate a valid script.");
+        console.error("AI output validation failed:", output);
+        throw new Error("AI failed to generate a valid script. The output was empty or not in the expected format.");
     }
-    // Basic filtering for common non-spoken patterns just in case
+    // Basic filtering for common non-spoken patterns just in case the LLM doesn't follow instructions perfectly.
     let cleanedScript = output.script;
-    // Remove lines starting with common indicators like [SOUND], (SOUND), Speaker:, Host:, etc.
-    cleanedScript = cleanedScript.replace(/^\s*\[.*?\]\s*$/gm, ''); // Remove [SOUND EFFECT]
-    cleanedScript = cleanedScript.replace(/^\s*\(.*?\)\s*$/gm, ''); // Remove (Whispering)
-    cleanedScript = cleanedScript.replace(/^\s*(Host|Speaker|Intro|Outro|Music):.*$/gm, ''); // Remove Speaker: lines
-    cleanedScript = cleanedScript.replace(/^\s*\/\/.*$/gm, ''); // Remove // comments
-    cleanedScript = cleanedScript.trim(); // Trim whitespace
+    console.log("Raw AI Script Output:\n", cleanedScript);
+
+    // Remove lines likely containing only non-spoken elements (more robust)
+    cleanedScript = cleanedScript.split('\n').filter(line => {
+        const trimmedLine = line.trim();
+        // Check for common patterns indicating non-spoken content
+        if (trimmedLine.startsWith('[') && trimmedLine.endsWith(']')) return false; // [SOUND EFFECT]
+        if (trimmedLine.startsWith('(') && trimmedLine.endsWith(')')) return false; // (Whispering)
+        if (/^(Host|Speaker|Intro|Outro|Music|Guest)\s*:/i.test(trimmedLine)) return false; // Speaker: Blah
+        if (trimmedLine.startsWith('//')) return false; // // Comment
+        if (trimmedLine.startsWith('<!--') && trimmedLine.endsWith('-->')) return false; // HTML comment
+        if (/^\[\d{2}:\d{2}(:\d{2})?\]$/.test(trimmedLine)) return false; // [00:30] or [00:30:15]
+        if (/^==.*==$/.test(trimmedLine)) return false; // == Section ==
+        if (trimmedLine === '') return true; // Keep empty lines for paragraph breaks if desired, or filter if not
+        return true; // Keep lines that don't match the filters
+    }).join('\n');
+
+    // Trim leading/trailing whitespace from the final script
+    cleanedScript = cleanedScript.trim();
+
+    console.log("Cleaned Script Output:\n", cleanedScript);
+
+     if (!cleanedScript) {
+        console.error("Script became empty after cleaning. Original AI output:", output.script);
+        throw new Error("AI generated a script, but it was filtered out entirely. Please try a different keyword or check the AI prompt instructions.");
+    }
+
 
     return { script: cleanedScript };
   }
