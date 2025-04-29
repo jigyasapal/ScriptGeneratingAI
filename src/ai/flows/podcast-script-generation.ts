@@ -17,7 +17,7 @@ const GeneratePodcastScriptInputSchema = z.object({
 export type GeneratePodcastScriptInput = z.infer<typeof GeneratePodcastScriptInputSchema>;
 
 const GeneratePodcastScriptOutputSchema = z.object({
-  script: z.string().describe('The generated podcast script.'),
+  script: z.string().describe('The generated podcast script, containing only the spoken words.'),
 });
 export type GeneratePodcastScriptOutput = z.infer<typeof GeneratePodcastScriptOutputSchema>;
 
@@ -34,10 +34,14 @@ const prompt = ai.definePrompt({
   },
   output: {
     schema: z.object({
-      script: z.string().describe('The generated podcast script.'),
+      script: z.string().describe('The generated podcast script, containing only the spoken words suitable for text-to-speech.'),
     }),
   },
-  prompt: `You are a podcast script writer. Generate a full podcast script based on the following keyword, including introduction, main content, and conclusion.\n\nKeyword: {{{keyword}}}`,
+  prompt: `You are a podcast script writer. Generate a full podcast script based on the following keyword, including introduction, main content, and conclusion.
+
+IMPORTANT: The output script should contain ONLY the words meant to be spoken aloud by a host. Do NOT include any stage directions, speaker names, sound effect cues, comments, or any other non-spoken text. Format the script with paragraphs for readability, but ensure only the spoken dialogue is present.
+
+Keyword: {{{keyword}}}`,
 });
 
 const generatePodcastScriptFlow = ai.defineFlow<
@@ -51,6 +55,19 @@ const generatePodcastScriptFlow = ai.defineFlow<
   },
   async input => {
     const {output} = await prompt(input);
-    return output!;
+    // Ensure output exists and contains the script field
+    if (!output || typeof output.script !== 'string') {
+        throw new Error("AI failed to generate a valid script.");
+    }
+    // Basic filtering for common non-spoken patterns just in case
+    let cleanedScript = output.script;
+    // Remove lines starting with common indicators like [SOUND], (SOUND), Speaker:, Host:, etc.
+    cleanedScript = cleanedScript.replace(/^\s*\[.*?\]\s*$/gm, ''); // Remove [SOUND EFFECT]
+    cleanedScript = cleanedScript.replace(/^\s*\(.*?\)\s*$/gm, ''); // Remove (Whispering)
+    cleanedScript = cleanedScript.replace(/^\s*(Host|Speaker|Intro|Outro|Music):.*$/gm, ''); // Remove Speaker: lines
+    cleanedScript = cleanedScript.replace(/^\s*\/\/.*$/gm, ''); // Remove // comments
+    cleanedScript = cleanedScript.trim(); // Trim whitespace
+
+    return { script: cleanedScript };
   }
 );
