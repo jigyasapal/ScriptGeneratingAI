@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Copy, Loader2, Music, Play, Square, VolumeX } from 'lucide-react'; // Removed Settings2 and Popover imports
+import { Copy, Loader2, Play, Square } from 'lucide-react'; // Removed Music, VolumeX
 import { useToast } from '@/hooks/use-toast';
 import { generateScriptAction, type GenerateScriptActionState } from './actions';
 
@@ -19,17 +19,9 @@ export default function Home() {
   const [isPending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const [isReading, setIsReading] = useState(false);
-  const [isMusicMuted, setIsMusicMuted] = useState(false);
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string | undefined>(undefined);
   const [areVoicesLoaded, setAreVoicesLoaded] = useState(false);
-  const [isMusicLoaded, setIsMusicLoaded] = useState(false); // Track music loading status
-
-  // Refs for Web Audio API
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioBufferRef = useRef<AudioBuffer | null>(null);
-  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null); // Ref for volume control
 
   // Refs for Speech Synthesis
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -42,6 +34,7 @@ export default function Home() {
     const populateVoiceList = () => {
         if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
           console.warn('Speech Synthesis not supported.');
+          toast({ variant: "destructive", title: "Audio Warning", description: "Text-to-speech may not work in this browser." });
           return;
         }
         const voices = speechSynthesis.getVoices();
@@ -49,122 +42,41 @@ export default function Home() {
             const englishVoices = voices.filter(voice => voice.lang.startsWith('en'));
             setAvailableVoices(englishVoices);
             setAreVoicesLoaded(true);
+            // Set default voice only if one hasn't been selected yet and voices are available
             if (!selectedVoiceURI && englishVoices.length > 0) {
                 let defaultVoice = englishVoices.find(v => v.name.includes('Google') && v.lang === 'en-US');
                 if (!defaultVoice) defaultVoice = englishVoices.find(v => v.lang === 'en-US');
-                if (!defaultVoice) defaultVoice = englishVoices[0];
-                setSelectedVoiceURI(defaultVoice.voiceURI);
-                console.log("Default voice set to:", defaultVoice?.name);
+                if (!defaultVoice) defaultVoice = englishVoices[0]; // Fallback to the first English voice
+                if (defaultVoice) { // Ensure a voice was found before setting
+                  setSelectedVoiceURI(defaultVoice.voiceURI);
+                   console.log("Default voice set to:", defaultVoice?.name);
+                } else {
+                    console.warn("Could not find a suitable default English voice.");
+                }
             }
-            console.log('Voices loaded:', englishVoices.length);
+            console.log('English voices loaded:', englishVoices.length);
         } else {
              console.log("Waiting for voices to load...");
         }
     };
 
     populateVoiceList();
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window && speechSynthesis.onvoiceschanged !== undefined) {
+    // Check if speechSynthesis is supported before adding the event listener
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window && typeof speechSynthesis.onvoiceschanged !== 'undefined') {
         speechSynthesis.onvoiceschanged = populateVoiceList;
     }
 
     return () => {
-        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        // Check if speechSynthesis is supported before removing the event listener
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window && typeof speechSynthesis.onvoiceschanged !== 'undefined') {
             speechSynthesis.onvoiceschanged = null;
         }
     };
-  }, []); // Run only once on mount
-
-  // --- Background Music Loading Effect ---
-  useEffect(() => {
-    let isMounted = true;
-    const loadMusic = async () => {
-      if (!window.AudioContext && !(window as any).webkitAudioContext) {
-         console.warn('Web Audio API is not supported in this browser.');
-         toast({ variant: "destructive", title: "Audio Warning", description: "Background music may not work in this browser." });
-         return;
-      }
-
-      try {
-        console.log('Fetching background music (/background-music.mp3)...');
-        // Add cache-busting query param? might not be needed if server handles it
-        const response = await fetch('/background-music.mp3');
-        if (!response.ok) {
-            console.error(`Music file fetch failed: ${response.status} ${response.statusText}`);
-            throw new Error(`Failed to fetch music file (${response.status}). Ensure 'public/background-music.mp3' exists.`);
-        }
-         // Check content type? response.headers.get('content-type')?.includes('audio/mpeg')
-        const arrayBuffer = await response.arrayBuffer();
-
-         if (!isMounted) return; // Avoid processing if component unmounted
-
-        // Create or resume the main audio context *here* if possible, or ensure it's ready before decoding
-         if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-            const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-             if (AudioContext) {
-                 audioContextRef.current = new AudioContext();
-            } else {
-                 throw new Error("Web Audio API not available.");
-            }
-        }
-         if (audioContextRef.current.state === 'suspended') {
-            await audioContextRef.current.resume();
-        }
-
-        console.log('Decoding audio data...');
-        // Use the persistent audio context for decoding
-        audioContextRef.current.decodeAudioData(arrayBuffer)
-          .then(buffer => {
-            if (isMounted) {
-              audioBufferRef.current = buffer;
-              setIsMusicLoaded(true); // Set music loaded state
-              console.log('Background music loaded and decoded successfully.');
-            }
-          })
-          .catch(decodeError => {
-             console.error('Error decoding audio data:', decodeError);
-             if (isMounted) {
-                 toast({
-                   variant: 'destructive',
-                   title: 'Audio Decode Error',
-                   description: `Failed to decode background music: ${decodeError.message}. File might be corrupted or unsupported.`,
-                 });
-             }
-          });
-
-      } catch (error) {
-         if(isMounted){
-            console.error('Error loading background music:', error);
-            toast({
-              variant: 'destructive',
-              title: 'Audio Load Error',
-              description: `Failed to load background music: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            });
-            setIsMusicLoaded(false); // Ensure state reflects failure
-            audioBufferRef.current = null;
-         }
-      }
-    };
-
-    loadMusic();
-
-    // Cleanup function
-    return () => {
-      isMounted = false;
-      console.log('Cleaning up audio resources (on unmount)...');
-      stopAudioPlayback(); // Stop any ongoing playback
-      // Close the audio context only when the component truly unmounts
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-          audioContextRef.current.close().catch(err => console.error("Error closing AudioContext:", err));
-          audioContextRef.current = null;
-          console.log("AudioContext closed.");
-      }
-    };
-     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run only once on mount
+  }, [selectedVoiceURI]); // Rerun if selectedVoiceURI changes (relevant for initial load)
 
 
-  // Function to stop audio playback and cleanup associated nodes
-  const stopAudioPlayback = () => {
+  // Function to stop speech synthesis
+  const stopSpeechPlayback = () => {
     let stopped = false;
     // Stop Speech Synthesis
     if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
@@ -174,28 +86,6 @@ export default function Home() {
     }
      utteranceRef.current = null; // Clear utterance ref
 
-    // Stop Web Audio Music Source Node
-    if (audioSourceRef.current) {
-      try {
-        audioSourceRef.current.stop();
-        audioSourceRef.current.disconnect(); // Disconnect from gain node
-        console.log('Background music source stopped and disconnected.');
-      } catch (error) {
-        // Ignore errors like "Cannot call stop more than once"
-        if (!(error instanceof DOMException && error.name === 'InvalidStateError')) {
-            console.warn('Error during audio source stop/disconnect:', error);
-        }
-      }
-      audioSourceRef.current = null;
-      stopped = true;
-    }
-     // Disconnect Gain Node from destination
-     if (gainNodeRef.current) {
-        gainNodeRef.current.disconnect(); // Disconnect from context destination
-        gainNodeRef.current = null; // Clear gain node ref
-        console.log('Gain node disconnected.');
-     }
-
     if (stopped) {
         setIsReading(false); // Update state only if something was actually stopped
     }
@@ -204,7 +94,7 @@ export default function Home() {
 
   // Stop audio if script changes or keyword changes
   useEffect(() => {
-    stopAudioPlayback();
+    stopSpeechPlayback();
      // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.script]);
 
@@ -215,7 +105,7 @@ export default function Home() {
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    stopAudioPlayback(); // Stop any ongoing playback before generating new script
+    stopSpeechPlayback(); // Stop any ongoing playback before generating new script
     const formData = new FormData(event.currentTarget);
     startTransition(() => {
       formAction(formData);
@@ -244,8 +134,8 @@ export default function Home() {
 
  const handleReadAloud = async () => {
     if (isReading) {
-      console.log('Stopping playback...');
-      stopAudioPlayback();
+      console.log('Stopping speech playback...');
+      stopSpeechPlayback();
       return; // Exit early if stopping
     }
 
@@ -254,71 +144,25 @@ export default function Home() {
       toast({ variant: 'destructive', title: 'Error', description: 'No script available to read.' });
       return;
     }
-    if (!('speechSynthesis' in window) || (!window.AudioContext && !(window as any).webkitAudioContext)) {
-      toast({ variant: 'destructive', title: 'Unsupported Browser', description: 'Audio playback (TTS or background music) is not fully supported in this browser.' });
+    if (!('speechSynthesis' in window)) {
+      toast({ variant: 'destructive', title: 'Unsupported Browser', description: 'Text-to-speech is not supported in this browser.' });
       return;
-    }
-    if (!isMusicLoaded && audioBufferRef.current === null) {
-        toast({ variant: 'destructive', title: 'Audio Not Ready', description: 'Background music is still loading or failed to load. Please wait or try refreshing.' });
-        // Optionally try to load music again here? Or just inform the user.
-        return;
     }
      if (!areVoicesLoaded) {
          toast({ variant: 'destructive', title: 'Voices Not Ready', description: 'Text-to-speech voices are still loading. Please wait a moment.' });
          return;
      }
+     if (!selectedVoiceURI) {
+        toast({ variant: 'destructive', title: 'Voice Not Selected', description: 'Please select a voice first.' });
+        return;
+     }
 
-    console.log('Starting playback...');
+    console.log('Starting speech playback...');
     setIsReading(true); // Set reading state immediately
 
     try {
-      // 1. --- Ensure Audio Context is Running ---
-      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-        console.log('Recreating AudioContext...');
-        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-        if(!AudioContext) throw new Error("Web Audio API not supported");
-        audioContextRef.current = new AudioContext();
-      }
-      if (audioContextRef.current.state === 'suspended') {
-          console.log('Resuming suspended AudioContext...');
-          await audioContextRef.current.resume();
-      }
 
-      // 2. --- Setup and Start Background Music ---
-      if (audioBufferRef.current) { // Only proceed if buffer is loaded
-          // Cleanup previous nodes if they exist (redundant safety check)
-          if (audioSourceRef.current) {
-              try { audioSourceRef.current.stop(); audioSourceRef.current.disconnect(); } catch (e) { /* ignore */ }
-              audioSourceRef.current = null;
-          }
-          if (gainNodeRef.current) {
-              gainNodeRef.current.disconnect();
-              gainNodeRef.current = null;
-          }
-
-          // Create new nodes
-           if (!audioContextRef.current) throw new Error("AudioContext lost before node creation"); // Should not happen
-          audioSourceRef.current = audioContextRef.current.createBufferSource();
-          audioSourceRef.current.buffer = audioBufferRef.current;
-          audioSourceRef.current.loop = true;
-
-          gainNodeRef.current = audioContextRef.current.createGain();
-          // Set initial volume based on mute state
-          gainNodeRef.current.gain.setValueAtTime(isMusicMuted ? 0 : 0.25, audioContextRef.current.currentTime); // Lower default volume
-
-          // Connect nodes: Source -> Gain -> Destination
-          audioSourceRef.current.connect(gainNodeRef.current);
-          gainNodeRef.current.connect(audioContextRef.current.destination);
-
-          console.log('Starting background music...');
-          audioSourceRef.current.start(0); // Start playback now
-      } else {
-          console.warn("Music buffer not available, skipping music playback.");
-          // Optionally inform user music won't play
-          // toast({ title: "Music Warning", description: "Background music could not be played." });
-      }
-
-      // 3. --- Setup and Start Speech Synthesis ---
+      // --- Setup and Start Speech Synthesis ---
       if (speechSynthesis.speaking) {
           console.warn("Speech synthesis was already active, cancelling previous utterance.");
           speechSynthesis.cancel(); // Cancel any previous speech
@@ -346,13 +190,10 @@ export default function Home() {
       // Event Handlers for Speech Synthesis
       utterance.onstart = () => {
         console.log('Speech started.');
-        // setIsReading(true); // Already set at the beginning
       };
 
       utterance.onend = () => {
         console.log('Speech finished.');
-        // Don't stop music here automatically, let the user control it.
-        // If music should stop, call stopAudioPlayback() here.
         setIsReading(false); // Reset reading state
         utteranceRef.current = null; // Clear utterance ref
       };
@@ -365,7 +206,7 @@ export default function Home() {
           title: 'Speech Error',
           description: `Could not read the script aloud: ${errorMsg}`,
         });
-        stopAudioPlayback(); // Cleanup on speech error
+        stopSpeechPlayback(); // Cleanup on speech error
       };
 
       // Start speech
@@ -379,28 +220,9 @@ export default function Home() {
         title: 'Playback Error',
         description: `An error occurred trying to play audio: ${error instanceof Error ? error.message : 'Unknown error'}`,
       });
-      stopAudioPlayback(); // Ensure cleanup happens on any error
+      stopSpeechPlayback(); // Ensure cleanup happens on any error
       setIsReading(false); // Explicitly reset state on error
     }
-  };
-
-
-  const handleToggleMusicMute = () => {
-    if (!gainNodeRef.current || !audioContextRef.current) {
-        console.warn("Cannot toggle mute: Gain node or AudioContext not available.");
-        // Optionally inform user if music isn't playing?
-        return;
-    }
-
-    const newMuteState = !isMusicMuted;
-    setIsMusicMuted(newMuteState);
-
-    // Use setTargetAtTime for smooth volume transition
-    const targetVolume = newMuteState ? 0 : 0.25; // Consistent with initial volume
-    const transitionTime = 0.05; // Short fade duration
-    gainNodeRef.current.gain.setTargetAtTime(targetVolume, audioContextRef.current.currentTime, transitionTime);
-
-    console.log(`Music ${newMuteState ? 'muted' : 'unmuted'}. Target volume: ${targetVolume}`);
   };
 
 
@@ -409,7 +231,7 @@ export default function Home() {
       console.log("Voice selected:", value);
       // Stop playback if it's currently running with the old voice
       if (isReading) {
-          stopAudioPlayback();
+          stopSpeechPlayback();
           // Decide if you want to automatically start reading with the new voice.
           // Using a small delay might be necessary for the system to be ready.
           // setTimeout(handleReadAloud, 150);
@@ -450,7 +272,7 @@ export default function Home() {
              <div className="space-y-2">
                 <Label htmlFor="voice-select" className="font-semibold text-foreground">Voice</Label>
                 <Select
-                    value={selectedVoiceURI}
+                    value={selectedVoiceURI || ""} // Ensure value is never undefined for Select
                     onValueChange={handleVoiceChange}
                     disabled={!areVoicesLoaded || availableVoices.length === 0 || isLoading}
                     name="voice-select"
@@ -466,7 +288,7 @@ export default function Home() {
                         {availableVoices.length > 0 ? (
                             availableVoices.map((voice) => (
                             <SelectItem key={voice.voiceURI} value={voice.voiceURI} className="cursor-pointer">
-                                {voice.name} ({voice.lang}) {voice.localService ? '' : ''} {/* Simplified label */}
+                                {voice.name} ({voice.lang})
                             </SelectItem>
                             ))
                         ) : (
@@ -513,25 +335,12 @@ export default function Home() {
                      size="icon"
                      className="text-foreground hover:bg-accent/20 disabled:opacity-50"
                      onClick={handleReadAloud}
-                     aria-label={isReading ? "Stop reading script" : "Read script aloud with background music"}
-                     // Disable if music/voices not ready, or if generating
-                     disabled={isLoading || !areVoicesLoaded || !isMusicLoaded}
-                     title={isReading ? "Stop Playback" : "Read Aloud with Music"}
+                     aria-label={isReading ? "Stop reading script" : "Read script aloud"}
+                     // Disable if voices not ready, or if generating, or no voice selected
+                     disabled={isLoading || !areVoicesLoaded || availableVoices.length === 0 || !selectedVoiceURI}
+                     title={isReading ? "Stop Playback" : "Read Aloud"}
                    >
                      {isReading ? <Square className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-                   </Button>
-
-                   {/* Mute Button - Only enable when reading */}
-                   <Button
-                     variant="ghost"
-                     size="icon"
-                     className="text-foreground hover:bg-accent/20 disabled:opacity-50"
-                     onClick={handleToggleMusicMute}
-                     aria-label={isMusicMuted ? "Unmute background music" : "Mute background music"}
-                     disabled={!isReading} // Only allow mute/unmute while actively reading
-                     title={isMusicMuted ? "Unmute Music" : "Mute Music"}
-                   >
-                     {isMusicMuted ? <VolumeX className="h-5 w-5" /> : <Music className="h-5 w-5" />}
                    </Button>
 
                     {/* Copy Button */}
