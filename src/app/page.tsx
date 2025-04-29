@@ -1,24 +1,29 @@
 'use client';
 
-import type {ChangeEvent, FormEvent} from 'react';
-import React, {useState, useTransition, useRef, useEffect} from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
+import React, { useState, useTransition, useRef, useEffect } from 'react';
 import { useActionState } from 'react';
-import {Button} from '@/components/ui/button';
-import {Input} from '@/components/ui/input';
-import {Label} from '@/components/ui/label';
-import {Textarea} from '@/components/ui/textarea';
-import {Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle} from '@/components/ui/card';
-import {Copy, Loader2, Music, Play, Square, VolumeX} from 'lucide-react';
-import {useToast} from '@/hooks/use-toast';
-import {generateScriptAction, type GenerateScriptActionState} from './actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Copy, Loader2, Music, Play, Square, VolumeX, Settings2 } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { generateScriptAction, type GenerateScriptActionState } from './actions';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'; // Import Popover
 
 export default function Home() {
-  const {toast} = useToast();
+  const { toast } = useToast();
   const [keyword, setKeyword] = useState('');
   const [isPending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const [isReading, setIsReading] = useState(false);
   const [isMusicMuted, setIsMusicMuted] = useState(false); // State for muting music
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState<string | undefined>(undefined);
+  const [areVoicesLoaded, setAreVoicesLoaded] = useState(false); // Track voice loading
 
   // Refs for Web Audio API
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -32,35 +37,70 @@ export default function Home() {
   const initialState: GenerateScriptActionState = {};
   const [state, formAction, isFormPending] = useActionState(generateScriptAction, initialState);
 
-  // Load background music on component mount
+  // --- Voice Loading Effect ---
+  useEffect(() => {
+    const populateVoiceList = () => {
+        if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+          console.warn('Speech Synthesis not supported.');
+          return;
+        }
+        const voices = speechSynthesis.getVoices();
+        if (voices.length > 0) {
+            // Filter for potentially higher quality / non-local voices if desired
+            const englishVoices = voices.filter(voice => voice.lang.startsWith('en'));
+            setAvailableVoices(englishVoices);
+            setAreVoicesLoaded(true);
+            // Set a default voice if none selected
+            if (!selectedVoiceURI && englishVoices.length > 0) {
+                 // Try to find a suitable default (e.g., Google US English)
+                let defaultVoice = englishVoices.find(v => v.name.includes('Google') && v.lang === 'en-US');
+                if (!defaultVoice) defaultVoice = englishVoices.find(v => v.lang === 'en-US');
+                if (!defaultVoice) defaultVoice = englishVoices[0]; // Fallback to the first English voice
+                setSelectedVoiceURI(defaultVoice.voiceURI);
+                console.log("Default voice set to:", defaultVoice.name);
+            }
+            console.log('Voices loaded:', englishVoices.length);
+        }
+    };
+
+    // Check immediately
+    populateVoiceList();
+
+    // Check again when voices change (important for some browsers)
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        speechSynthesis.onvoiceschanged = populateVoiceList;
+    }
+
+    // Cleanup
+    return () => {
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            speechSynthesis.onvoiceschanged = null;
+        }
+    };
+  }, [selectedVoiceURI]); // Rerun if selectedVoiceURI changes? No, only on mount.
+
+  // --- Background Music Loading Effect ---
   useEffect(() => {
     const loadMusic = async () => {
       try {
-        // Check if AudioContext is supported
         if (!window.AudioContext && !(window as any).webkitAudioContext) {
            console.warn('Web Audio API is not supported in this browser.');
            toast({ variant: "destructive", title: "Audio Error", description: "Background music requires a modern browser." });
            return;
         }
-        // Use existing context or create one - moved context creation to handleReadAloud interaction
-        // const AudioContext = window.AudioContext || window.webkitAudioContext;
-        // audioContextRef.current = new AudioContext(); // Create context here if needed universally
 
-        // Ensure you have a `public/background-music.mp3` file.
         console.log('Fetching background music...');
         const response = await fetch('/background-music.mp3');
         if (!response.ok) {
-            // Log the actual status text for more details
             console.error(`Music file fetch failed: ${response.status} ${response.statusText}`);
             throw new Error(`Music file not found or fetch failed (${response.status})`);
         }
         const arrayBuffer = await response.arrayBuffer();
 
-        // Create a *temporary* context just for decoding, as the main one should be created on user interaction
         const tempAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         console.log('Decoding audio data...');
         audioBufferRef.current = await tempAudioContext.decodeAudioData(arrayBuffer);
-        await tempAudioContext.close(); // Close the temporary context
+        await tempAudioContext.close();
         console.log('Background music loaded successfully.');
 
       } catch (error) {
@@ -70,7 +110,7 @@ export default function Home() {
           title: 'Audio Load Error',
           description: `Failed to load background music: ${error instanceof Error ? error.message : 'Unknown error'}`,
         });
-        audioBufferRef.current = null; // Ensure buffer is null on error
+        audioBufferRef.current = null;
       }
     };
 
@@ -79,9 +119,7 @@ export default function Home() {
     // Cleanup audio resources on unmount
     return () => {
       console.log('Cleaning up audio resources...');
-      // Stop any active playback
       stopAudioPlayback();
-      // Close the main AudioContext if it exists
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close().catch(console.error);
         audioContextRef.current = null;
@@ -104,10 +142,9 @@ export default function Home() {
     if (audioSourceRef.current) {
       try {
         audioSourceRef.current.stop();
-        audioSourceRef.current.disconnect(); // Disconnect the node
+        audioSourceRef.current.disconnect();
         console.log('Background music stopped and disconnected.');
       } catch (error) {
-        // Ignore errors like "cannot call stop more than once" or if context is already closed
         console.warn('Ignoring error during audio source stop/disconnect:', error);
       }
       audioSourceRef.current = null;
@@ -116,11 +153,6 @@ export default function Home() {
         gainNodeRef.current.disconnect();
         gainNodeRef.current = null;
      }
-    // Don't close the context here, reuse it
-    // if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-    //   audioContextRef.current.close().catch(console.error);
-    //   audioContextRef.current = null;
-    // }
     setIsReading(false); // Update state after stopping everything
   };
 
@@ -129,7 +161,7 @@ export default function Home() {
   useEffect(() => {
     stopAudioPlayback();
      // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.script]); // Dependency on state.script ensures playback stops if a new script is generated
+  }, [state.script]); // Dependency on state.script
 
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -185,88 +217,92 @@ export default function Home() {
 
       // 1. --- Initialize Web Audio API for Music (if not already) ---
       try {
-        // Create AudioContext on user interaction if needed
         if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
           console.log('Creating new AudioContext...');
           const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
           if(!AudioContext) throw new Error("Web Audio API not supported");
           audioContextRef.current = new AudioContext();
         }
-        // Resume context if suspended (required by browser autoplay policies)
         if (audioContextRef.current.state === 'suspended') {
             console.log('Resuming suspended AudioContext...');
             await audioContextRef.current.resume();
         }
 
-        // Check if music buffer is loaded
         if (!audioBufferRef.current) {
           toast({ variant: 'destructive', title: 'Audio Error', description: 'Background music buffer not loaded yet. Please wait or try refreshing.' });
           console.warn('Audio buffer is not loaded.');
-           // Don't proceed with music playback if buffer isn't ready
         } else {
-            // Ensure previous source is stopped and disconnected before creating a new one
             if (audioSourceRef.current) {
-                try {
-                    audioSourceRef.current.stop();
-                    audioSourceRef.current.disconnect();
-                 } catch (e) { console.warn("Error stopping previous audio source:", e)}
+                try { audioSourceRef.current.stop(); audioSourceRef.current.disconnect(); } catch (e) { console.warn("Error stopping previous audio source:", e)}
                  audioSourceRef.current = null;
             }
              if (gainNodeRef.current) {
-                 gainNodeRef.current.disconnect();
-                 gainNodeRef.current = null;
+                 gainNodeRef.current.disconnect(); gainNodeRef.current = null;
             }
 
-
-            // Create Audio Source and Gain Node
             console.log('Setting up audio source and gain node...');
-            if (!audioContextRef.current) throw new Error("AudioContext lost"); // Should not happen, but check
+            if (!audioContextRef.current) throw new Error("AudioContext lost");
             audioSourceRef.current = audioContextRef.current.createBufferSource();
             audioSourceRef.current.buffer = audioBufferRef.current;
-            audioSourceRef.current.loop = true; // Loop the background music
+            audioSourceRef.current.loop = true;
 
             gainNodeRef.current = audioContextRef.current.createGain();
-            gainNodeRef.current.gain.setValueAtTime(isMusicMuted ? 0 : 0.3, audioContextRef.current.currentTime); // Start with initial volume (lower for background)
+            gainNodeRef.current.gain.setValueAtTime(isMusicMuted ? 0 : 0.3, audioContextRef.current.currentTime);
 
-            // Connect nodes: Source -> Gain -> Destination (speakers)
             audioSourceRef.current.connect(gainNodeRef.current);
             gainNodeRef.current.connect(audioContextRef.current.destination);
 
-            // Start music playback
             console.log('Starting background music...');
-            audioSourceRef.current.start(0); // Start immediately
+            audioSourceRef.current.start(0);
         }
 
       } catch (error) {
         console.error('Error setting up Web Audio:', error);
         toast({ variant: 'destructive', title: 'Audio Setup Error', description: `Failed to initialize background music: ${error instanceof Error ? error.message : 'Unknown error'}` });
-        stopAudioPlayback(); // Cleanup on error
-        return; // Don't proceed if audio setup fails
+        stopAudioPlayback();
+        return;
       }
 
       // 2. --- Initialize Speech Synthesis ---
       try {
         console.log('Setting up speech synthesis...');
-        // Cancel any previous speech
         if (speechSynthesis.speaking) {
             speechSynthesis.cancel();
         }
 
         const utterance = new SpeechSynthesisUtterance(state.script);
-        utteranceRef.current = utterance; // Store utterance ref
+        utteranceRef.current = utterance;
+
+        // Set the selected voice
+        const selectedVoice = availableVoices.find(voice => voice.voiceURI === selectedVoiceURI);
+        if (selectedVoice) {
+            utterance.voice = selectedVoice;
+            console.log(`Using selected voice: ${selectedVoice.name} (${selectedVoice.lang})`);
+        } else if (availableVoices.length > 0 && !selectedVoiceURI) {
+             // Fallback to the previously set default if selection is somehow lost
+             const defaultVoice = availableVoices.find(v => v.name.includes('Google') && v.lang === 'en-US') || availableVoices.find(v => v.lang === 'en-US') || availableVoices[0];
+             if(defaultVoice) {
+                utterance.voice = defaultVoice;
+                console.warn('Selected voice not found, falling back to default:', defaultVoice.name);
+             } else {
+                 console.warn('Could not find any suitable English voice. Using browser default.');
+             }
+        } else {
+          console.warn('No specific voice selected or available. Using browser default.');
+        }
+
 
         // Event Handlers for Speech Synthesis
         utterance.onstart = () => {
           console.log('Speech started.');
-          setIsReading(true); // Set reading state *after* speech actually starts
+          setIsReading(true);
         };
 
         utterance.onend = () => {
           console.log('Speech finished.');
-          // Keep music playing - user stops manually.
-          setIsReading(false); // Only mark speech as finished
+          setIsReading(false);
           utteranceRef.current = null;
-          // If you want music to stop when speech ends, uncomment:
+          // Optional: stop music when speech ends
           // stopAudioPlayback();
         };
 
@@ -282,46 +318,6 @@ export default function Home() {
           stopAudioPlayback(); // Cleanup on speech error
         };
 
-
-        // Get available voices asynchronously
-        const getVoices = (): Promise<SpeechSynthesisVoice[]> => {
-            return new Promise((resolve) => {
-                let voices = speechSynthesis.getVoices();
-                if (voices.length > 0) {
-                    resolve(voices);
-                } else if ('onvoiceschanged' in speechSynthesis) {
-                    speechSynthesis.onvoiceschanged = () => {
-                        voices = speechSynthesis.getVoices();
-                        speechSynthesis.onvoiceschanged = null; // Remove listener
-                        resolve(voices);
-                    };
-                } else {
-                    resolve([]); // No support for onvoiceschanged
-                }
-            });
-        };
-
-
-        const voices = await getVoices();
-        console.log('Available voices:', voices.length);
-
-        // Attempt to select a suitable voice (example: English, non-local)
-        let preferredVoice = voices.find(voice => voice.lang.startsWith('en') && !voice.localService && voice.name.includes('Google')); // Prioritize Google voices
-        if (!preferredVoice) preferredVoice = voices.find(voice => voice.lang.startsWith('en') && !voice.localService); // Then other non-local English
-        if (!preferredVoice) preferredVoice = voices.find(voice => voice.lang.startsWith('en')); // Fallback to any English voice
-
-        if (preferredVoice) {
-          utterance.voice = preferredVoice;
-          console.log(`Using voice: ${preferredVoice.name} (${preferredVoice.lang})`);
-        } else {
-          console.warn('Could not find a preferred English voice. Using default.');
-        }
-
-        // Adjust pitch and rate for a more podcast-like feel (optional)
-        // utterance.pitch = 1.1; // Slightly higher pitch
-        // utterance.rate = 0.95; // Slightly slower rate
-
-
         // Start speech
         console.log('Speaking utterance...');
         speechSynthesis.speak(utterance);
@@ -333,7 +329,7 @@ export default function Home() {
           title: 'Speech Setup Error',
           description: `Failed to initialize text-to-speech: ${error instanceof Error ? error.message : 'Unknown error'}`,
         });
-        stopAudioPlayback(); // Cleanup if setup fails
+        stopAudioPlayback();
       }
     }
   };
@@ -344,13 +340,21 @@ export default function Home() {
     const newMuteState = !isMusicMuted;
     setIsMusicMuted(newMuteState);
 
-    // Set gain to 0 if muted, or back to 0.3 if unmuted
     const targetVolume = newMuteState ? 0 : 0.3;
-    // Use setTargetAtTime for a smoother transition (optional)
-    gainNodeRef.current.gain.setTargetAtTime(targetVolume, audioContextRef.current.currentTime, 0.01); // Quick fade
-    // Or set immediately: gainNodeRef.current.gain.setValueAtTime(targetVolume, audioContextRef.current.currentTime);
+    gainNodeRef.current.gain.setTargetAtTime(targetVolume, audioContextRef.current.currentTime, 0.01);
 
     console.log(`Music ${newMuteState ? 'muted' : 'unmuted'}`);
+  };
+
+  const handleVoiceChange = (value: string) => {
+      setSelectedVoiceURI(value);
+      console.log("Voice selected:", value);
+      // Stop playback if it's currently running with the old voice
+      if (isReading) {
+          stopAudioPlayback();
+          // Maybe automatically start reading with the new voice?
+          // setTimeout(handleReadAloud, 100); // Small delay
+      }
   };
 
 
@@ -362,7 +366,7 @@ export default function Home() {
         <CardHeader>
           <CardTitle className="text-3xl font-bold text-center">Podcast Pilot</CardTitle>
           <CardDescription className="text-center text-muted-foreground">
-            Enter a keyword and let AI generate your next podcast script.
+            Enter a keyword, choose a voice, and let AI generate & read your podcast script.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -381,6 +385,34 @@ export default function Home() {
               />
               {state.error && <p className="text-sm text-destructive">{state.error}</p>}
             </div>
+             {/* Voice Selection Dropdown */}
+             <div className="space-y-2">
+                <Label htmlFor="voice-select" className="font-semibold">Voice</Label>
+                <Select
+                    value={selectedVoiceURI}
+                    onValueChange={handleVoiceChange}
+                    disabled={!areVoicesLoaded || availableVoices.length === 0 || isLoading}
+                    name="voice-select" // Added name for potential form handling
+                    // id="voice-select" // Redundant if label htmlFor points to it
+                >
+                    <SelectTrigger id="voice-select" className="w-full" aria-label="Select reading voice">
+                        <SelectValue placeholder={areVoicesLoaded ? "Select a voice..." : "Loading voices..."} />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {availableVoices.length > 0 ? (
+                            availableVoices.map((voice) => (
+                            <SelectItem key={voice.voiceURI} value={voice.voiceURI}>
+                                {voice.name} ({voice.lang}) {voice.localService ? '(Local)' : ''}
+                            </SelectItem>
+                            ))
+                        ) : (
+                            <SelectItem value="loading" disabled>
+                            {areVoicesLoaded ? "No English voices found" : "Loading voices..."}
+                            </SelectItem>
+                        )}
+                    </SelectContent>
+                </Select>
+             </div>
             <Button
               type="submit"
               className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
@@ -408,7 +440,10 @@ export default function Home() {
                   className="min-h-[300px] text-base bg-secondary"
                   aria-label="Generated podcast script"
                 />
-                <div className="absolute top-2 right-2 flex space-x-1">
+                {/* Action Buttons */}
+                 <div className="absolute top-2 right-2 flex space-x-1">
+
+                   {/* Mute Button */}
                    <Button
                      variant="ghost"
                      size="icon"
@@ -420,28 +455,81 @@ export default function Home() {
                    >
                      {isMusicMuted ? <VolumeX className="h-4 w-4" /> : <Music className="h-4 w-4" />}
                    </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={handleReadAloud}
-                    aria-label={isReading ? "Stop reading script" : "Read script aloud with background music"}
-                    disabled={isLoading} // Only disable if generating
-                    title={isReading ? "Stop Playback" : "Read Aloud with Music"}
-                  >
-                    {isReading ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={handleCopy}
-                    aria-label="Copy script to clipboard"
-                    disabled={isLoading}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
+
+                   {/* Read Aloud / Stop Button */}
+                   <Button
+                     variant="ghost"
+                     size="icon"
+                     className="text-muted-foreground hover:text-foreground"
+                     onClick={handleReadAloud}
+                     aria-label={isReading ? "Stop reading script" : "Read script aloud with background music"}
+                     disabled={isLoading || !areVoicesLoaded} // Disable if loading script or voices
+                     title={isReading ? "Stop Playback" : "Read Aloud with Music"}
+                   >
+                     {isReading ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                   </Button>
+
+                    {/* Copy Button */}
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-foreground"
+                        onClick={handleCopy}
+                        aria-label="Copy script to clipboard"
+                        disabled={isLoading}
+                        title="Copy Script"
+                    >
+                        <Copy className="h-4 w-4" />
+                    </Button>
+
+                    {/* Settings/Voice Popover - Optional */}
+                     {/*
+                     <Popover>
+                        <PopoverTrigger asChild>
+                            <Button variant="ghost" size="icon" title="Playback Settings">
+                                <Settings2 className="h-4 w-4" />
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-80">
+                            <div className="grid gap-4">
+                                <div className="space-y-2">
+                                <h4 className="font-medium leading-none">Playback Settings</h4>
+                                <p className="text-sm text-muted-foreground">
+                                    Adjust voice and other settings.
+                                </p>
+                                </div>
+                                <div className="grid gap-2">
+                                     <Label htmlFor="voice-popover-select">Voice</Label>
+                                     <Select
+                                        value={selectedVoiceURI}
+                                        onValueChange={handleVoiceChange}
+                                        disabled={!areVoicesLoaded || availableVoices.length === 0 || isLoading}
+                                    >
+                                        <SelectTrigger id="voice-popover-select" className="w-full">
+                                            <SelectValue placeholder={areVoicesLoaded ? "Select a voice..." : "Loading voices..."} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                             {availableVoices.length > 0 ? (
+                                                availableVoices.map((voice) => (
+                                                <SelectItem key={voice.voiceURI} value={voice.voiceURI}>
+                                                    {voice.name} ({voice.lang}) {voice.localService ? '(Local)' : ''}
+                                                </SelectItem>
+                                                ))
+                                            ) : (
+                                                <SelectItem value="loading" disabled>
+                                                {areVoicesLoaded ? "No English voices found" : "Loading voices..."}
+                                                </SelectItem>
+                                            )}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                            </div>
+                        </PopoverContent>
+                     </Popover>
+                    */}
+
+                 </div>
               </div>
             </div>
           )}
