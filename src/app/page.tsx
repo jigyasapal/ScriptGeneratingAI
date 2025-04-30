@@ -26,9 +26,21 @@ const downloadFile = (filename: string, text: string) => {
   document.body.removeChild(element);
 };
 
+// Helper to get language name
+const getLanguageName = (langCode: Language): string => {
+    switch (langCode) {
+        case 'en': return 'English';
+        case 'hi': return 'Hindi';
+        case 'es': return 'Spanish';
+        case 'fr': return 'French';
+        case 'de': return 'German';
+        default: return langCode;
+    }
+};
+
 
 export default function Home() {
-  const { toast, toasts } = useToast(); // Removed isActive usage
+  const { toast, toasts } = useToast();
   const [keyword, setKeyword] = useState('');
   const [selectedLength, setSelectedLength] = useState<ScriptLength>('medium');
   const [selectedTone, setSelectedTone] = useState<ConversationTone>('conversational'); // Use ConversationTone
@@ -67,7 +79,7 @@ export default function Home() {
 
     // Function to attempt loading voices and set up listeners/intervals
     const setupVoices = () => {
-        console.log(`Setting up voices for language: ${selectedLanguage}`);
+        console.log(`Setting up voices for language: ${selectedLanguage} (${getLanguageName(selectedLanguage)})`);
         if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
             populateVoiceList(); // Initial attempt to populate
 
@@ -130,7 +142,7 @@ export default function Home() {
         }
 
         const voices = speechSynthesis.getVoices();
-        console.log(`Populating voices for language: ${selectedLanguage}. Found ${voices.length} total voices.`);
+        console.log(`Populating voices for language: ${selectedLanguage} (${getLanguageName(selectedLanguage)}). Found ${voices.length} total voices.`);
 
 
         if (voices.length > 0) {
@@ -140,17 +152,20 @@ export default function Home() {
              const languagePrefix = selectedLanguage.split('-')[0]; // 'en', 'hi', 'es', 'fr', 'de'
              const filteredVoices = voices.filter(voice => voice.lang.startsWith(languagePrefix));
 
-             console.log(`Found ${filteredVoices.length} voices for prefix "${languagePrefix}"`);
-             console.log(`Filtered voices:`, filteredVoices.map(v => `${v.name} (${v.lang}) ${v.default ? '[Default]' : ''}`));
+             console.log(`Found ${filteredVoices.length} voices for prefix "${languagePrefix}" (${getLanguageName(selectedLanguage)})`);
+             console.log(`Filtered voices (${getLanguageName(selectedLanguage)}):`, filteredVoices.map(v => `${v.name} (${v.lang}) ${v.default ? '[Default]' : ''}`));
 
 
              // Check if the list of voices for the language actually changed
              // This prevents unnecessary state updates and potential re-renders
-             if (JSON.stringify(filteredVoices) !== JSON.stringify(availableVoices)) {
-                  console.log("Updating available voices state.");
+             const currentAvailableVoiceURIs = availableVoices.map(v => v.voiceURI).sort().join(',');
+             const newFilteredVoiceURIs = filteredVoices.map(v => v.voiceURI).sort().join(',');
+
+             if (newFilteredVoiceURIs !== currentAvailableVoiceURIs) {
+                  console.log("Updating available voices state for", getLanguageName(selectedLanguage));
                   setAvailableVoices(filteredVoices);
              } else {
-                 console.log("Filtered voice list hasn't changed, skipping state update.");
+                 console.log(`Filtered voice list for ${getLanguageName(selectedLanguage)} hasn't changed, skipping state update.`);
              }
 
             setAreVoicesLoaded(true);
@@ -167,7 +182,7 @@ export default function Home() {
             const currentVoiceIsValidForLanguage = selectedVoiceURI && filteredVoices.some(v => v.voiceURI === selectedVoiceURI);
 
             if (!currentVoiceIsValidForLanguage && filteredVoices.length > 0) {
-                 console.log("Selecting a default voice.");
+                 console.log(`Selecting a default voice for ${getLanguageName(selectedLanguage)}.`);
                  let defaultVoice: SpeechSynthesisVoice | undefined;
                  let specificLangTag: string;
 
@@ -230,17 +245,17 @@ export default function Home() {
 
                 if (defaultVoice) {
                     setSelectedVoiceURI(defaultVoice.voiceURI);
-                    console.log(`Default voice for "${selectedLanguage}" set to: ${defaultVoice.name} (${defaultVoice.lang}), URI: ${defaultVoice.voiceURI}`);
+                    console.log(`Default voice for "${selectedLanguage}" (${getLanguageName(selectedLanguage)}) set to: ${defaultVoice.name} (${defaultVoice.lang}), URI: ${defaultVoice.voiceURI}`);
                 } else {
                     // This case should be rare if filteredVoices.length > 0
                     setSelectedVoiceURI(undefined);
-                    console.warn(`Could not find any default voice candidate for language "${selectedLanguage}", even though voices exist.`);
+                    console.warn(`Could not find any default voice candidate for language "${selectedLanguage}" (${getLanguageName(selectedLanguage)}), even though voices exist.`);
                 }
             } else if (currentVoiceIsValidForLanguage) {
-                 console.log("Keeping currently selected valid voice:", availableVoices.find(v => v.voiceURI === selectedVoiceURI)?.name);
+                 console.log(`Keeping currently selected valid voice for ${getLanguageName(selectedLanguage)}:`, availableVoices.find(v => v.voiceURI === selectedVoiceURI)?.name);
             } else if (filteredVoices.length === 0) {
                  setSelectedVoiceURI(undefined); // Clear selection if no voices available
-                 console.warn(`No voices available for language "${selectedLanguage}".`);
+                 console.warn(`No voices available for language "${selectedLanguage}" (${getLanguageName(selectedLanguage)}).`);
                  const toastId = `no-voices-available-${selectedLanguage}`;
                  // Avoid showing duplicate toasts
                   if (!toasts.some(t => t.id === toastId)) {
@@ -248,7 +263,7 @@ export default function Home() {
                           id: toastId,
                           variant: 'warning',
                           title: 'No Voices Found',
-                          description: `No voices installed on your system/browser for ${selectedLanguage}. Playback unavailable.`,
+                          description: `No voices installed on your system/browser for ${getLanguageName(selectedLanguage)}. Playback unavailable.`,
                      });
                  }
             }
@@ -355,7 +370,7 @@ export default function Home() {
      // Include new languages
      const validLanguages: Language[] = ['en', 'hi', 'es', 'fr', 'de'];
      if (validLanguages.includes(value as Language)) {
-         console.log(`Language changed to: ${value}`);
+         console.log(`Language changed to: ${value} (${getLanguageName(value as Language)})`);
          setSelectedLanguage(value as Language);
          // Stop playback immediately when language changes
          stopSpeechPlayback();
@@ -419,7 +434,7 @@ export default function Home() {
                 id: toastId,
                 variant: 'destructive',
                 title: 'Voice Not Selected',
-                description: `Please select a voice for ${selectedLanguage} to download the audio.`,
+                description: `Please select a voice for ${getLanguageName(selectedLanguage)} to download the audio.`,
             });
         }
         return;
@@ -472,10 +487,10 @@ export default function Home() {
          return;
      }
      if (availableVoices.length === 0) {
-          console.error(`No voices available for the selected language (${selectedLanguage}).`);
+          console.error(`No voices available for the selected language (${selectedLanguage} - ${getLanguageName(selectedLanguage)}).`);
            const toastId = 'no-voices-playback-error';
             if (!toasts.some(t => t.id === toastId)) {
-                toast({ id: toastId, variant: 'destructive', title: 'No Voices Found', description: `Cannot play script. No voices found for ${selectedLanguage}.` });
+                toast({ id: toastId, variant: 'destructive', title: 'No Voices Found', description: `Cannot play script. No voices found for ${getLanguageName(selectedLanguage)}.` });
             }
           return;
      }
@@ -483,7 +498,7 @@ export default function Home() {
           console.error('No voice selected.');
           const toastId = 'no-voice-selected-playback-error';
           if (!toasts.some(t => t.id === toastId)) { // Check if toast is already active
-             toast({ id: toastId, variant: 'destructive', title: 'Voice Not Selected', description: `Please select a voice for ${selectedLanguage} first.` });
+             toast({ id: toastId, variant: 'destructive', title: 'Voice Not Selected', description: `Please select a voice for ${getLanguageName(selectedLanguage)} first.` });
           }
         return;
      }
@@ -526,35 +541,44 @@ export default function Home() {
       utteranceRef.current = utterance; // Store the reference immediately
 
       const selectedVoice = availableVoices.find(voice => voice.voiceURI === selectedVoiceURI);
+      let specificLangTag: string;
+
+      // Determine the specific language tag to set on the utterance, crucial for correct pronunciation
+      switch (selectedLanguage) {
+        case 'hi': specificLangTag = 'hi-IN'; break;
+        case 'es': specificLangTag = 'es-ES'; break; // Or another locale like es-MX if preferred
+        case 'fr': specificLangTag = 'fr-FR'; break;
+        case 'de': specificLangTag = 'de-DE'; break;
+        case 'en': specificLangTag = 'en-US'; break; // Or en-GB etc.
+        default: specificLangTag = selectedLanguage; // Fallback to the base code
+      }
 
       if (selectedVoice) {
           utterance.voice = selectedVoice;
-          utterance.lang = selectedVoice.lang; // Set lang explicitly from the chosen voice
+          utterance.lang = selectedVoice.lang; // Use the voice's specific language tag (e.g., 'hi-IN', 'en-US')
           console.log(`Using voice: ${selectedVoice.name} (${selectedVoice.lang}), URI: ${selectedVoice.voiceURI}`);
       } else {
         // This *shouldn't* happen if selectedVoiceURI is valid, but handle defensively
-        console.warn(`Selected voice URI "${selectedVoiceURI}" not found in the current available voices list for ${selectedLanguage}. Attempting to use browser default based on language.`);
-        // Attempt to set language anyway, browser might pick *a* default based on this
-         let specificLangTag: string;
-         switch (selectedLanguage) {
-             case 'hi': specificLangTag = 'hi-IN'; break;
-             case 'es': specificLangTag = 'es-ES'; break;
-             case 'fr': specificLangTag = 'fr-FR'; break;
-             case 'de': specificLangTag = 'de-DE'; break;
-             case 'en': specificLangTag = 'en-US'; break;
-             default: specificLangTag = selectedLanguage;
-         }
-         utterance.lang = specificLangTag; // Use specific locale hint
+        console.warn(`Selected voice URI "${selectedVoiceURI}" not found in the current available voices list for ${selectedLanguage}. Attempting to use browser default based on language tag: ${specificLangTag}.`);
+         utterance.lang = specificLangTag; // Set the determined specific language tag as a hint
         const toastId = 'voice-not-found-playback-warning';
          if (!toasts.some(t => t.id === toastId)) { // Check if toast is already active
             toast({
                 id: toastId,
                 variant: 'warning',
                 title: 'Voice Not Found',
-                description: `Selected voice was unavailable. Attempting to use a default voice for ${utterance.lang}. Playback quality may vary.`,
+                description: `Selected voice was unavailable. Attempting to use a default voice for ${specificLangTag}. Playback quality may vary.`,
             });
          }
       }
+       // **Crucial**: Ensure utterance.lang is set correctly even if a specific voice was found.
+       // Some browsers might still need the explicit lang tag on the utterance itself.
+       // Use the more specific tag determined earlier.
+       if (utterance.lang !== specificLangTag) {
+           console.log(`Overriding utterance lang from voice default (${utterance.lang}) to specific tag ${specificLangTag} for better compatibility.`);
+           utterance.lang = specificLangTag;
+       }
+
 
       // Set standard properties (optional, defaults are usually 1)
       utterance.rate = 1;
@@ -563,7 +587,7 @@ export default function Home() {
 
       console.log('Utterance configured:', {
         textLength: utterance.text.length,
-        lang: utterance.lang,
+        lang: utterance.lang, // Log the final language tag set
         voiceName: utterance.voice?.name,
         rate: utterance.rate,
         pitch: utterance.pitch,
@@ -607,7 +631,7 @@ export default function Home() {
                 if (isReading) setIsReading(false); // Ensure consistency if interrupted externally
                 break;
             case 'synthesis-failed':
-                description += `The speech engine failed to synthesize the text. The selected voice might be incompatible or corrupted. Try another voice.`;
+                description += `The speech engine failed to synthesize the text. The selected voice might be incompatible, corrupted, or unable to process the script for the language '${utterance.lang}'. Try another voice.`;
                 break;
             case 'audio-busy':
                 description += `The audio output device is busy. Close other audio applications and try again.`;
@@ -621,7 +645,7 @@ export default function Home() {
                 variant = "warning";
                 break;
             case 'language-unavailable':
-                description += `The language '${utterance.lang}' is not supported by the selected voice or speech engine.`;
+                description += `The language '${utterance.lang}' is not supported by the selected voice or speech engine. Please ensure you have voices installed for ${getLanguageName(selectedLanguage)}.`;
                 break;
             case 'voice-unavailable':
                 description += `The selected voice '${utterance.voice?.name}' is unavailable or invalid. Please select another voice.`;
@@ -630,14 +654,14 @@ export default function Home() {
                  description += `The script is too long for the speech synthesis engine to process at once. Try generating a shorter script.`;
                  break;
              case 'invalid-argument':
-                 description += `An invalid argument was provided to the speech synthesis engine. The script might contain unsupported characters.`;
+                 description += `An invalid argument was provided to the speech synthesis engine. The script might contain unsupported characters for the selected voice/language.`;
                  break;
             default:
                 description += `An unknown error occurred (${errorMsg}). Please try again or select a different voice.`;
         }
 
         // Show toast, avoiding duplicates for the same error type
-        const toastId = `speech-error-${errorMsg}`;
+        const toastId = `speech-error-${errorMsg}-${utterance.lang}`; // Include lang in ID for specificity
          if (!toasts.some(t => t.id === toastId)) { // Check if toast is already active
              toast({
                id: toastId,
@@ -821,7 +845,7 @@ export default function Home() {
                             <SelectValue placeholder={
                                 !areVoicesLoaded ? "Loading voices..." :
                                 availableVoices.length > 0 ? "Select a voice..." :
-                                `No voices found for ${selectedLanguage}`
+                                `No ${getLanguageName(selectedLanguage)} voices found`
                             } />
                         </SelectTrigger>
                         <SelectContent className="rounded-md shadow-lg max-h-60 overflow-y-auto">
@@ -837,7 +861,7 @@ export default function Home() {
                             ) : (
                                 // Display if no voices found for the language
                                 <SelectItem value="no-voices" disabled className="text-destructive">
-                                    No {selectedLanguage} voices found
+                                    No {getLanguageName(selectedLanguage)} voices found
                                 </SelectItem>
                             )}
                         </SelectContent>
@@ -846,7 +870,7 @@ export default function Home() {
                      {!areVoicesLoaded && <p className="text-xs text-muted-foreground pt-1">Loading available voices...</p>}
                      {areVoicesLoaded && availableVoices.length === 0 && (
                          <p className="text-xs text-destructive pt-1">
-                             No voices found for {selectedLanguage} in your browser/OS. Playback unavailable.
+                             No voices found for {getLanguageName(selectedLanguage)} in your browser/OS. Playback unavailable.
                          </p>
                      )}
                 </div>
@@ -919,7 +943,7 @@ export default function Home() {
                      aria-label={isReading ? "Stop reading script" : "Read script aloud"}
                      // Disable conditions: form loading, voices not loaded, no voices for lang, no voice selected, no script text
                      disabled={isLoading || !areVoicesLoaded || availableVoices.length === 0 || !selectedVoiceURI || !state.script}
-                     title={isReading ? "Stop Playback" : (isLoading ? "Generating..." : (!state.script ? "No script" : (!areVoicesLoaded ? "Voices loading..." : (availableVoices.length === 0 ? `No ${selectedLanguage} voices` : (!selectedVoiceURI ? "Select voice" : "Read Aloud")))))} // Detailed title
+                     title={isReading ? "Stop Playback" : (isLoading ? "Generating..." : (!state.script ? "No script" : (!areVoicesLoaded ? "Voices loading..." : (availableVoices.length === 0 ? `No ${getLanguageName(selectedLanguage)} voices` : (!selectedVoiceURI ? "Select voice" : "Read Aloud")))))} // Detailed title
                      aria-live="polite" // Announce reading state changes
                    >
                      {isReading ? <Square className="h-5 w-5" aria-hidden="true"/> : <Play className="h-5 w-5" aria-hidden="true"/>}
@@ -973,3 +997,5 @@ export default function Home() {
     </main>
   );
 }
+
+    
