@@ -13,11 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { Copy, Download, Loader2, Play, Square, AudioWaveform } from 'lucide-react'; // Added AudioWaveform
 import { useToast } from '@/hooks/use-toast';
 import { generateScriptAction, type GenerateScriptActionState } from './actions';
-import type { ScriptLength, EmotionTone } from '@/ai/flows/podcast-script-generation'; // Import EmotionTone
-
-// Define types moved from flow file for frontend use
-// export type EmotionTone = 'neutral' | 'happy' | 'sad' | 'excited' | 'formal' | 'casual'; // Moved to flow export
-export type Language = 'en' | 'hi';
+import type { ScriptLength, EmotionTone, Language } from '@/ai/flows/podcast-script-generation'; // Import EmotionTone and Language
 
 // Helper function to create a downloadable text file
 const downloadFile = (filename: string, text: string) => {
@@ -406,10 +402,26 @@ export default function Home() {
 
     try {
       // Cancel any ongoing or pending speech BEFORE creating a new utterance.
+      // This is crucial to prevent race conditions and errors.
       if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
           console.log("Cancelling existing/pending speech before starting new one.");
           window.speechSynthesis.cancel();
-          await new Promise(resolve => setTimeout(resolve, 150)); // Short delay
+
+          // Wait a brief moment to ensure cancellation is processed
+          await new Promise(resolve => setTimeout(resolve, 150));
+
+           // Double check if cancel worked, sometimes it takes time or fails silently
+           if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+               console.warn("Cancellation might not have completed immediately. Waiting slightly longer.");
+               await new Promise(resolve => setTimeout(resolve, 300)); // Longer wait
+               if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+                   console.error("Failed to cancel previous speech. Playback aborted.");
+                   toast({ variant: 'destructive', title: 'Playback Error', description: 'Could not stop previous speech. Please try again.' });
+                   setIsReading(false); // Ensure state is correct
+                   utteranceRef.current = null;
+                   return;
+               }
+           }
       }
 
 
@@ -460,23 +472,29 @@ export default function Home() {
       utterance.onend = () => {
         console.log('Speech playback finished naturally.');
         setIsReading(false);
-        utteranceRef.current = null;
+        utteranceRef.current = null; // Clear ref ONLY when finished naturally
       };
 
       utterance.onerror = (event) => {
+        // More detailed error logging
         const errorMsg = event.error || 'Unknown speech error';
         console.error('SpeechSynthesisUtterance.onerror:', errorMsg, event);
         console.error('Utterance details on error:', {
-             textSnippet: utterance.text.substring(0, 100) + "...",
+             textSnippet: utterance.text.substring(0, 100) + "...", // Log beginning of text
              lang: utterance.lang,
              voiceName: utterance.voice?.name,
              voiceURI: utterance.voice?.voiceURI,
         });
 
         let description = `Could not read the script. Error: ${errorMsg}.`;
-         if (errorMsg === 'interrupted') {
-            console.warn("Speech interrupted, possibly by user action (stop button, new generation, voice change, etc.).");
-             if (isReading) {
+
+        if (errorMsg === 'interrupted') {
+            // Often happens due to user action (stop button, new generation, etc.)
+            // or sometimes browser internal issues. Don't always show a harsh error toast.
+             console.warn("Speech interrupted. This might be expected if you clicked Stop or changed settings.");
+             // We already reset state in stopSpeechPlayback, so mostly just log here.
+             // Ensure state is correct IF it wasn't stopped by our code.
+             if (isReading) { // Check if we still thought we were reading
                  setIsReading(false);
                  utteranceRef.current = null;
              }
@@ -490,14 +508,14 @@ export default function Home() {
                  description += ` A network error occurred, possibly while trying to load a cloud-based voice. Check connection?`;
             } else if (errorMsg === 'invalid-argument') {
                 description += ` Invalid input for speech synthesis. The script might contain unsupported characters or be too long for the selected voice.`;
-            }
-            else {
+            } else {
                 description += " Please try again or select a different voice."
             }
 
             // Use toast ID to prevent spamming the same error
             const toastId = `speech-error-${errorMsg}`;
-            const isToastActive = toasts.some(t => t.id === toastId && t.open);
+             // Check if this toast is already active using the provided toasts array
+             const isToastActive = toasts.some(t => t.id === toastId && t.open);
             if (!isToastActive) {
                  toast({
                    id: toastId,
@@ -506,9 +524,11 @@ export default function Home() {
                    description: description,
                  });
             }
-              // Reset state on significant errors
-              setIsReading(false);
-              utteranceRef.current = null;
+              // Reset state on significant errors ONLY IF it wasn't already reset
+              if (isReading) {
+                 setIsReading(false);
+              }
+              utteranceRef.current = null; // Clear ref on error
         }
       };
 
@@ -528,7 +548,7 @@ export default function Home() {
                description: `An unexpected error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`,
              });
         }
-      stopSpeechPlayback();
+      stopSpeechPlayback(); // Ensure cleanup on unexpected errors
     }
   };
 
