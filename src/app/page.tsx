@@ -10,10 +10,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { Copy, Download, Loader2, Play, Square, AudioWaveform } from 'lucide-react'; // Added AudioWaveform
+import { Copy, Download, Loader2, Play, Square, AudioWaveform } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { generateScriptAction, type GenerateScriptActionState } from './actions';
-import type { ScriptLength, EmotionTone, Language } from '@/ai/flows/podcast-script-generation'; // Import EmotionTone and Language
+import type { ScriptLength, EmotionTone, Language } from '@/ai/flows/podcast-script-generation';
 
 // Helper function to create a downloadable text file
 const downloadFile = (filename: string, text: string) => {
@@ -49,56 +49,67 @@ export default function Home() {
   const initialState: GenerateScriptActionState = {};
   const [state, formAction, isFormPending] = useActionState(generateScriptAction, initialState);
 
-  // Stop speech if script changes or language changes
-  useEffect(() => {
-    stopSpeechPlayback();
-    // Reset selected voice if language changes
-    setSelectedVoiceURI(undefined);
-    populateVoiceList(); // Repopulate voices for the new language
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.script, selectedLanguage]);
-
-
-    // --- Voice Loading Effect ---
+  // --- Voice Loading Effect ---
    useEffect(() => {
+    // Cleanup function
     const cleanup = () => {
-        // Cleanup: remove listener and stop any speech
         if (typeof window !== 'undefined' && 'speechSynthesis' in window && typeof speechSynthesis.onvoiceschanged !== 'undefined') {
-            speechSynthesis.onvoiceschanged = null;
+            speechSynthesis.onvoiceschanged = null; // Remove listener
         }
         if (voiceCheckIntervalRef.current) {
-            clearInterval(voiceCheckIntervalRef.current);
+            clearInterval(voiceCheckIntervalRef.current); // Clear interval
             voiceCheckIntervalRef.current = null;
         }
-        stopSpeechPlayback();
+        stopSpeechPlayback(); // Stop any ongoing speech on cleanup or language change
+        console.log("Speech synthesis effect cleanup performed.");
     };
 
-    populateVoiceList(); // Initial attempt
+    // Function to attempt loading voices and set up listeners/intervals
+    const setupVoices = () => {
+        console.log(`Setting up voices for language: ${selectedLanguage}`);
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            populateVoiceList(); // Initial attempt to populate
 
-    // Event listener for voices changing
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-         // Always set the listener if supported
-        speechSynthesis.onvoiceschanged = populateVoiceList;
+            // Set up the event listener for voice changes
+            speechSynthesis.onvoiceschanged = () => {
+                console.log("onvoiceschanged event fired.");
+                populateVoiceList();
+            };
 
-        // Fallback check if onvoiceschanged isn't fired initially or reliably
-        startVoiceCheckInterval();
-    } else {
-        console.warn('Speech Synthesis not supported.');
-        setAreVoicesLoaded(true); // Mark as loaded to avoid infinite loading state
-    }
+            // Fallback interval check if voices aren't loaded quickly or `onvoiceschanged` is unreliable
+            // Start checking only if voices aren't already loaded after the initial populateVoiceList call
+            const voicesNow = speechSynthesis.getVoices();
+             if (voicesNow.length === 0 && !voiceCheckIntervalRef.current) {
+                startVoiceCheckInterval();
+             }
+        } else {
+            console.warn('Speech Synthesis not supported by this browser.');
+            setAreVoicesLoaded(true); // Mark as 'loaded' (but unavailable) to prevent infinite loading state
+        }
+    };
 
-    return cleanup; // Return cleanup function
+    cleanup(); // Clean up previous effect first (e.g., listeners for old language)
+    setAreVoicesLoaded(false); // Reset loading state when language changes
+    setSelectedVoiceURI(undefined); // Clear selected voice for the new language
+    setAvailableVoices([]); // Clear available voices list
+    setupVoices(); // Set up for the new language
+
+    return cleanup; // Return the cleanup function to be called when component unmounts or language changes again
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLanguage]); // Re-run when language changes
+  }, [selectedLanguage]); // Re-run only when the selected language changes
 
 
   const startVoiceCheckInterval = () => {
-        if (voiceCheckIntervalRef.current) return; // Prevent multiple intervals
+        if (voiceCheckIntervalRef.current) {
+             console.log("Voice check interval already running.");
+             return; // Prevent multiple intervals
+        }
+        console.log("Starting voice check interval.");
         voiceCheckIntervalRef.current = setInterval(() => {
             const voices = typeof window !== 'undefined' && 'speechSynthesis' in window ? speechSynthesis.getVoices() : [];
             if (voices.length > 0) {
                 console.log("Voices loaded via interval check.");
-                populateVoiceList(); // Call populate list which now handles clearing the interval
+                populateVoiceList(); // This will clear the interval
             } else {
                 console.log("Still waiting for voices via interval...");
             }
@@ -109,22 +120,38 @@ export default function Home() {
    const populateVoiceList = () => {
         if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
             console.warn('Speech Synthesis not supported, cannot populate voices.');
-            setAreVoicesLoaded(true); // Mark as loaded to avoid infinite loading state
+            setAreVoicesLoaded(true); // Avoid infinite loading
+             if (voiceCheckIntervalRef.current) {
+                 clearInterval(voiceCheckIntervalRef.current); // Clear interval if running
+                 voiceCheckIntervalRef.current = null;
+             }
             return;
         }
+
         const voices = speechSynthesis.getVoices();
-         console.log(`Populating voices for language: ${selectedLanguage}. Found ${voices.length} total voices initially.`);
+        console.log(`Populating voices for language: ${selectedLanguage}. Found ${voices.length} total voices.`);
 
 
         if (voices.length > 0) {
-             console.log(`Available voices:`, voices.map(v => `${v.name} (${v.lang})`));
+             console.log(`Available voices raw:`, voices.map(v => `${v.name} (${v.lang}) ${v.default ? '[Default]' : ''}`));
+
              // Filter voices based on the selected language prefix (e.g., 'en' or 'hi')
              const languagePrefix = selectedLanguage.split('-')[0]; // 'en' or 'hi'
              const filteredVoices = voices.filter(voice => voice.lang.startsWith(languagePrefix));
 
              console.log(`Found ${filteredVoices.length} voices for prefix "${languagePrefix}"`);
+             console.log(`Filtered voices:`, filteredVoices.map(v => `${v.name} (${v.lang}) ${v.default ? '[Default]' : ''}`));
 
-            setAvailableVoices(filteredVoices);
+
+             // Check if the list of voices for the language actually changed
+             // This prevents unnecessary state updates and potential re-renders
+             if (JSON.stringify(filteredVoices) !== JSON.stringify(availableVoices)) {
+                  console.log("Updating available voices state.");
+                  setAvailableVoices(filteredVoices);
+             } else {
+                 console.log("Filtered voice list hasn't changed, skipping state update.");
+             }
+
             setAreVoicesLoaded(true);
 
             // Clear interval if voices are successfully loaded
@@ -134,53 +161,69 @@ export default function Home() {
                 console.log("Voice check interval cleared.");
             }
 
+            // --- Default Voice Selection Logic ---
+            // Only set a default if one isn't already selected OR if the current selection is no longer valid for the new language
+            const currentVoiceIsValidForLanguage = selectedVoiceURI && filteredVoices.some(v => v.voiceURI === selectedVoiceURI);
 
-            // Set default voice only if one hasn't been selected or the current one isn't valid for the new language
-            const currentVoiceIsValid = selectedVoiceURI && filteredVoices.some(v => v.voiceURI === selectedVoiceURI);
-            if ((!selectedVoiceURI || !currentVoiceIsValid) && filteredVoices.length > 0) {
-                let defaultVoice: SpeechSynthesisVoice | undefined;
-                 // Prioritize language-specific defaults if available (heuristic)
-                 if (selectedLanguage === 'en') {
-                    defaultVoice = filteredVoices.find(v => v.name.includes('Google') && v.lang.startsWith('en-US'));
-                    if (!defaultVoice) defaultVoice = filteredVoices.find(v => v.lang.startsWith('en-US'));
-                    if (!defaultVoice) defaultVoice = filteredVoices.find(v => v.default && v.lang.startsWith('en'));
-                 } else if (selectedLanguage === 'hi') {
-                    // Prioritize voices explicitly mentioning Hindi or having the hi-IN lang tag
-                    defaultVoice = filteredVoices.find(v => v.name.toLowerCase().includes('hindi') && v.lang.startsWith('hi'));
-                    if (!defaultVoice) defaultVoice = filteredVoices.find(v => v.lang.startsWith('hi-IN'));
-                    if (!defaultVoice) defaultVoice = filteredVoices.find(v => v.name.toLowerCase().includes('google') && v.lang.startsWith('hi')); // Google voices can be good
-                    if (!defaultVoice) defaultVoice = filteredVoices.find(v => v.default && v.lang.startsWith('hi'));
+            if (!currentVoiceIsValidForLanguage && filteredVoices.length > 0) {
+                 console.log("Selecting a default voice.");
+                 let defaultVoice: SpeechSynthesisVoice | undefined;
+
+                 // --- Prioritization Strategy ---
+                 // 1. Voices explicitly marked as default by the browser *for the specific language tag* (e.g., 'en-US', 'hi-IN')
+                 defaultVoice = filteredVoices.find(v => v.default && v.lang === (selectedLanguage === 'hi' ? 'hi-IN' : 'en-US'));
+                 if(defaultVoice) console.log("Found browser default for specific lang tag:", defaultVoice.name);
+
+                 // 2. Google voices for the specific language tag (often high quality)
+                 if (!defaultVoice) {
+                    defaultVoice = filteredVoices.find(v => v.name.includes('Google') && v.lang === (selectedLanguage === 'hi' ? 'hi-IN' : 'en-US'));
+                    if(defaultVoice) console.log("Found Google voice for specific lang tag:", defaultVoice.name);
+                 }
+                 // 3. Other voices for the specific language tag
+                 if (!defaultVoice) {
+                    defaultVoice = filteredVoices.find(v => v.lang === (selectedLanguage === 'hi' ? 'hi-IN' : 'en-US'));
+                    if(defaultVoice) console.log("Found other voice for specific lang tag:", defaultVoice.name);
                  }
 
-                 // General fallback
-                if (!defaultVoice) defaultVoice = filteredVoices.find(v => v.default); // Check browser default flag for the language
-                if (!defaultVoice && filteredVoices.length > 0) defaultVoice = filteredVoices[0]; // Absolute fallback
+                 // --- Broaden Search if Specific Tag Fails ---
+                 // 4. Browser default for the broader language prefix (e.g., 'en', 'hi')
+                 if (!defaultVoice) {
+                    defaultVoice = filteredVoices.find(v => v.default && v.lang.startsWith(languagePrefix));
+                     if(defaultVoice) console.log("Found browser default for language prefix:", defaultVoice.name);
+                 }
+                 // 5. Google voices for the broader language prefix
+                 if (!defaultVoice) {
+                     defaultVoice = filteredVoices.find(v => v.name.includes('Google') && v.lang.startsWith(languagePrefix));
+                     if(defaultVoice) console.log("Found Google voice for language prefix:", defaultVoice.name);
+                 }
+                 // 6. Microsoft voices for the broader language prefix
+                  if (!defaultVoice) {
+                     defaultVoice = filteredVoices.find(v => v.name.includes('Microsoft') && v.lang.startsWith(languagePrefix));
+                     if(defaultVoice) console.log("Found Microsoft voice for language prefix:", defaultVoice.name);
+                 }
+
+                 // 7. Any remaining voice for the language prefix (absolute fallback)
+                  if (!defaultVoice) {
+                      defaultVoice = filteredVoices[0];
+                       if(defaultVoice) console.log("Using first available voice as fallback:", defaultVoice.name);
+                  }
+
 
                 if (defaultVoice) {
                     setSelectedVoiceURI(defaultVoice.voiceURI);
-                    console.log(`Default voice for "${selectedLanguage}" set to: ${defaultVoice.name} (${defaultVoice.lang})`);
+                    console.log(`Default voice for "${selectedLanguage}" set to: ${defaultVoice.name} (${defaultVoice.lang}), URI: ${defaultVoice.voiceURI}`);
                 } else {
-                    setSelectedVoiceURI(undefined); // Ensure it's undefined if no suitable voice found
-                    console.warn(`Could not find a suitable default voice for language "${selectedLanguage}".`);
-                     // Optionally toast if no voices are found at all for the language
-                     if (filteredVoices.length === 0) {
-                        const toastId = `no-voices-found-${selectedLanguage}`;
-                        if (!toasts.some(t => t.id === toastId)) {
-                             toast({
-                                id: toastId,
-                                variant: 'warning',
-                                title: 'No Voices Found',
-                                description: `Could not find any voices for the selected language (${selectedLanguage}). Playback might not work.`,
-                            });
-                        }
-                     }
+                    // This case should be rare if filteredVoices.length > 0
+                    setSelectedVoiceURI(undefined);
+                    console.warn(`Could not find any default voice candidate for language "${selectedLanguage}", even though voices exist.`);
                 }
-            } else if (currentVoiceIsValid) {
+            } else if (currentVoiceIsValidForLanguage) {
                  console.log("Keeping currently selected valid voice:", availableVoices.find(v => v.voiceURI === selectedVoiceURI)?.name);
             } else if (filteredVoices.length === 0) {
                  setSelectedVoiceURI(undefined); // Clear selection if no voices available
                  console.warn(`No voices available for language "${selectedLanguage}".`);
                  const toastId = `no-voices-available-${selectedLanguage}`;
+                 // Avoid showing duplicate toasts
                   if (!toasts.some(t => t.id === toastId)) {
                      toast({
                           id: toastId,
@@ -191,9 +234,9 @@ export default function Home() {
                  }
             }
         } else {
-            console.log("Voices array is empty, waiting for onvoiceschanged or interval...");
+            console.log("Voices array is still empty, waiting for onvoiceschanged or interval...");
             setAreVoicesLoaded(false); // Keep showing loading state
-            // Ensure interval is running if voices aren't loaded yet
+            // Ensure interval is running if voices aren't loaded yet and it's not already running
              if (typeof window !== 'undefined' && 'speechSynthesis' in window && !voiceCheckIntervalRef.current) {
                  startVoiceCheckInterval();
              }
@@ -204,35 +247,54 @@ export default function Home() {
   // Function to stop speech synthesis
   const stopSpeechPlayback = () => {
     let stopped = false;
-    if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
-      window.speechSynthesis.cancel();
-      console.log('Speech synthesis cancelled.');
-      stopped = true;
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+            console.log('Calling speechSynthesis.cancel().');
+            window.speechSynthesis.cancel();
+            stopped = true;
+        } else {
+            console.log('Speech synthesis not speaking or pending, no need to cancel.');
+        }
+    } else {
+         console.log('Speech synthesis not supported or available, cannot stop.');
     }
-     // Always clear the ref, even if cancel didn't run (e.g., utterance ended naturally)
-    utteranceRef.current = null;
+     // Always clear the utterance ref after attempting to stop or if it wasn't running
+    if (utteranceRef.current) {
+        // Explicitly remove event listeners to prevent memory leaks, especially on errors/interruptions
+        utteranceRef.current.onstart = null;
+        utteranceRef.current.onend = null;
+        utteranceRef.current.onerror = null;
+        utteranceRef.current = null;
+        console.log('Utterance reference cleared.');
+    }
 
-    if (stopped || isReading) { // Update state if we stopped or thought we were reading
+
+    // Update state *after* operations, only if it needs changing
+    if (isReading) {
+        console.log('Setting isReading state to false.');
         setIsReading(false);
+    } else if (stopped) {
+        // If we issued a cancel but the state was already false, log it.
+        console.log('Issued cancel, but isReading was already false.');
     }
   };
 
 
   // Restore form fields on error
    useEffect(() => {
-        const prevState = state as GenerateScriptActionState & { submittedTone?: EmotionTone, submittedLanguage?: Language };
+        const prevState = state as GenerateScriptActionState;
 
-        if (prevState.error && prevState.submittedKeyword) {
+        if (prevState.error && prevState.submittedKeyword !== undefined) {
             setKeyword(prevState.submittedKeyword);
         }
-        if (prevState.error && prevState.submittedLength) {
+        if (prevState.error && prevState.submittedLength !== undefined) {
             setSelectedLength(prevState.submittedLength);
         }
-         if (prevState.error && prevState.submittedTone) {
+         if (prevState.error && prevState.submittedTone !== undefined) {
             setSelectedTone(prevState.submittedTone);
         }
-         if (prevState.error && prevState.submittedLanguage) {
-            const lang = prevState.submittedLanguage;
+         if (prevState.error && prevState.submittedLanguage !== undefined) {
+             const lang = prevState.submittedLanguage;
              if (['en', 'hi'].includes(lang)) {
                setSelectedLanguage(lang);
              }
@@ -250,16 +312,17 @@ export default function Home() {
     if (validLengths.includes(value as ScriptLength)) {
       setSelectedLength(value as ScriptLength);
     } else {
+        console.warn(`Invalid length value received: ${value}. Defaulting to 'medium'.`);
         setSelectedLength('medium'); // Default fallback
     }
   };
 
    const handleToneChange = (value: string) => {
-    // Assuming EmotionTone is imported correctly
     const validTones: EmotionTone[] = ['neutral', 'happy', 'sad', 'excited', 'formal', 'casual'];
     if (validTones.includes(value as EmotionTone)) {
         setSelectedTone(value as EmotionTone);
     } else {
+         console.warn(`Invalid tone value received: ${value}. Defaulting to 'neutral'.`);
         setSelectedTone('neutral');
     }
    };
@@ -267,13 +330,13 @@ export default function Home() {
    const handleLanguageChange = (value: string) => {
      const validLanguages: Language[] = ['en', 'hi'];
      if (validLanguages.includes(value as Language)) {
+         console.log(`Language changed to: ${value}`);
          setSelectedLanguage(value as Language);
-         // Stop playback and repopulate voices when language changes
+         // Stop playback immediately when language changes
          stopSpeechPlayback();
-         setAreVoicesLoaded(false); // Set loading state for voices
-         setSelectedVoiceURI(undefined); // Clear selected voice
-         // The useEffect hook listening to selectedLanguage will call populateVoiceList
+         // The useEffect hook listening to selectedLanguage handles voice list updates
      } else {
+          console.warn(`Invalid language value received: ${value}. Defaulting to 'en'.`);
          setSelectedLanguage('en');
      }
    };
@@ -286,6 +349,7 @@ export default function Home() {
     formData.set('length', selectedLength);
     formData.set('tone', selectedTone);
     formData.set('language', selectedLanguage);
+    console.log('Submitting form with FormData:', Object.fromEntries(formData.entries()));
     startTransition(() => {
       formAction(formData);
     });
@@ -319,19 +383,13 @@ export default function Home() {
 
   // Placeholder for Audio Download
   const handleDownloadAudio = () => {
-    // Check if a script exists
     if (!state.script) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'No script available to generate audio.',
-      });
+      toast({ variant: 'destructive', title: 'Error', description: 'No script available to generate audio.' });
       return;
     }
-    // Check if a voice is selected
     if (!selectedVoiceURI) {
         const toastId = 'audio-download-no-voice';
-         if (!toasts.some(t => t.id === toastId)) {
+         if (!toasts.some(t => t.id === toastId)) { // Check if toast is already active
             toast({
                 id: toastId,
                 variant: 'destructive',
@@ -342,20 +400,16 @@ export default function Home() {
         return;
     }
 
-    // Explain limitation: Browser TTS cannot directly generate downloadable audio files.
     const toastId = 'audio-download-unavailable';
-    if (!toasts.some(t => t.id === toastId)) {
+    if (!toasts.some(t => t.id === toastId)) { // Check if toast is already active
         toast({
         id: toastId,
-        variant: 'warning', // Use warning or info variant
+        variant: 'warning',
         title: 'Audio Download Unavailable',
-        description: 'Direct audio download requires a backend Text-to-Speech service. This feature is not implemented in the current version.',
-        duration: 5000, // Show for a bit longer
+        description: 'Direct audio download requires a backend Text-to-Speech service. This feature is not implemented.',
+        duration: 5000,
         });
     }
-
-    // Conceptual backend call remains commented out as before.
-    // ... (conceptual backend call logic) ...
   };
 
 
@@ -363,6 +417,7 @@ export default function Home() {
  const handlePlaybackToggle = async () => {
     console.log("handlePlaybackToggle called. isReading:", isReading);
 
+    // --- Stop Reading ---
     if (isReading) {
       console.log('Stopping playback...');
       stopSpeechPlayback();
@@ -371,6 +426,8 @@ export default function Home() {
 
     // --- Start Reading ---
     console.log("Attempting to start playback...");
+
+    // Pre-checks
     if (!state.script) {
       console.error('No script available to read.');
       toast({ variant: 'destructive', title: 'Error', description: 'No script available to read.' });
@@ -378,101 +435,117 @@ export default function Home() {
     }
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
        console.error('Speech Synthesis not supported.');
-      toast({ variant: 'destructive', title: 'Unsupported Browser', description: 'Text-to-speech is not supported.' });
+      toast({ variant: 'destructive', title: 'Unsupported Browser', description: 'Text-to-speech is not supported by your browser.' });
       return;
     }
      if (!areVoicesLoaded) {
          console.warn('Voices not loaded yet.');
-         toast({ variant: 'warning', title: 'Voices Loading', description: 'Please wait a moment for voices to load.' });
+         const toastId = 'voices-loading-playback';
+         if (!toasts.some(t => t.id === toastId)) {
+             toast({ id: toastId, variant: 'warning', title: 'Voices Loading', description: 'Please wait a moment for voices to load before playing.' });
+         }
          return;
+     }
+     if (availableVoices.length === 0) {
+          console.error(`No voices available for the selected language (${selectedLanguage}).`);
+           const toastId = 'no-voices-playback-error';
+            if (!toasts.some(t => t.id === toastId)) {
+                toast({ id: toastId, variant: 'destructive', title: 'No Voices Found', description: `Cannot play script. No voices found for ${selectedLanguage}.` });
+            }
+          return;
      }
      if (!selectedVoiceURI) {
           console.error('No voice selected.');
-          const toastId = 'no-voice-selected-error';
-          // Check if this toast is already active using the provided toasts array
-          const isToastActive = toasts.some(t => t.id === toastId && t.open);
-          if (!isToastActive) {
-             toast({ id: toastId, variant: 'destructive', title: 'Voice Not Selected', description: `Please select a voice for ${selectedLanguage} first, or ensure voices are available.` });
+          const toastId = 'no-voice-selected-playback-error';
+          if (!toasts.some(t => t.id === toastId)) { // Check if toast is already active
+             toast({ id: toastId, variant: 'destructive', title: 'Voice Not Selected', description: `Please select a voice for ${selectedLanguage} first.` });
           }
         return;
      }
 
     console.log('Proceeding with speech synthesis setup...');
 
-
     try {
-      // Cancel any ongoing or pending speech BEFORE creating a new utterance.
-      // This is crucial to prevent race conditions and errors.
+      // --- Ensure Clean State ---
+      // Cancel any existing speech VERY explicitly before starting new utterance
       if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
-          console.log("Cancelling existing/pending speech before starting new one.");
-          window.speechSynthesis.cancel();
+          console.log("Speech synthesis is speaking or pending. Cancelling previous utterance.");
+          stopSpeechPlayback(); // Use our robust stop function
 
-          // Wait a brief moment to ensure cancellation is processed
+          // Wait a brief moment to allow the cancel command to process.
+          // This is sometimes necessary, especially if called rapidly.
           await new Promise(resolve => setTimeout(resolve, 150));
 
-           // Double check if cancel worked, sometimes it takes time or fails silently
+           // Double-check cancellation worked
            if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
                console.warn("Cancellation might not have completed immediately. Waiting slightly longer.");
                await new Promise(resolve => setTimeout(resolve, 300)); // Longer wait
                if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
-                   console.error("Failed to cancel previous speech. Playback aborted.");
-                   toast({ variant: 'destructive', title: 'Playback Error', description: 'Could not stop previous speech. Please try again.' });
+                   console.error("FATAL: Failed to cancel previous speech synthesis. Playback aborted.");
+                   toast({ variant: 'destructive', title: 'Playback Error', description: 'Could not stop the previous speech. Please try again.' });
                    setIsReading(false); // Ensure state is correct
                    utteranceRef.current = null;
-                   return;
+                   return; // Abort playback attempt
                }
+               console.log("Cancellation confirmed after extra wait.");
+           } else {
+                console.log("Cancellation confirmed.");
            }
+      } else {
+           console.log("Speech synthesis idle, proceeding.");
       }
 
 
+      // --- Create and Configure Utterance ---
       const utterance = new SpeechSynthesisUtterance(state.script);
-      utteranceRef.current = utterance; // Store the utterance ref
+      utteranceRef.current = utterance; // Store the reference immediately
 
       const selectedVoice = availableVoices.find(voice => voice.voiceURI === selectedVoiceURI);
+
       if (selectedVoice) {
           utterance.voice = selectedVoice;
-          utterance.lang = selectedVoice.lang; // Explicitly set lang from the voice
+          utterance.lang = selectedVoice.lang; // Set lang explicitly from the chosen voice
           console.log(`Using voice: ${selectedVoice.name} (${selectedVoice.lang}), URI: ${selectedVoice.voiceURI}`);
       } else {
-        console.warn(`Selected voice URI "${selectedVoiceURI}" not found among available ${selectedLanguage} voices. Attempting to use browser default for the utterance language.`);
-        // Attempt to set language anyway, browser might pick a default based on this
-        utterance.lang = selectedLanguage === 'hi' ? 'hi-IN' : 'en-US'; // Set a reasonable default lang
-        const toastId = 'voice-not-found-warning';
-         if (!toasts.some(t => t.id === toastId)) {
+        // This *shouldn't* happen if selectedVoiceURI is valid, but handle defensively
+        console.warn(`Selected voice URI "${selectedVoiceURI}" not found in the current available voices list for ${selectedLanguage}. Attempting to use browser default based on language.`);
+        // Attempt to set language anyway, browser might pick *a* default based on this
+        utterance.lang = selectedLanguage === 'hi' ? 'hi-IN' : 'en-US'; // Use specific locale hint
+        const toastId = 'voice-not-found-playback-warning';
+         if (!toasts.some(t => t.id === toastId)) { // Check if toast is already active
             toast({
                 id: toastId,
                 variant: 'warning',
                 title: 'Voice Not Found',
-                description: `Selected voice unavailable. Using a default voice for ${utterance.lang}.`,
+                description: `Selected voice was unavailable. Attempting to use a default voice for ${utterance.lang}. Playback quality may vary.`,
             });
          }
       }
 
-      // Configure other utterance properties (optional, defaults are usually fine)
-      utterance.rate = 1; // Default speed
-      utterance.pitch = 1; // Default pitch
-      utterance.volume = 1; // Default volume
+      // Set standard properties (optional, defaults are usually 1)
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      utterance.volume = 1; // Ensure volume is max
 
-      console.log('Utterance properties before speak():', {
+      console.log('Utterance configured:', {
         textLength: utterance.text.length,
         lang: utterance.lang,
         voiceName: utterance.voice?.name,
-        voiceURI: utterance.voice?.voiceURI,
         rate: utterance.rate,
         pitch: utterance.pitch,
         volume: utterance.volume,
       });
 
-      // Event Handlers for the utterance
+      // --- Event Handlers ---
       utterance.onstart = () => {
-        console.log('Speech playback started.');
+        console.log('Speech playback started successfully.');
         setIsReading(true);
       };
 
       utterance.onend = () => {
         console.log('Speech playback finished naturally.');
         setIsReading(false);
-        utteranceRef.current = null; // Clear ref ONLY when finished naturally
+        utteranceRef.current = null; // Clear ref *only* on natural end
       };
 
       utterance.onerror = (event) => {
@@ -480,102 +553,131 @@ export default function Home() {
         const errorMsg = event.error || 'Unknown speech error';
         console.error('SpeechSynthesisUtterance.onerror:', errorMsg, event);
         console.error('Utterance details on error:', {
-             textSnippet: utterance.text.substring(0, 100) + "...", // Log beginning of text
+             textSnippet: utterance.text.substring(0, 100) + "...",
              lang: utterance.lang,
              voiceName: utterance.voice?.name,
              voiceURI: utterance.voice?.voiceURI,
         });
 
-        let description = `Could not read the script. Error: ${errorMsg}.`;
+        let description = `Could not read the script. `;
+        let title = 'Speech Error';
+        let variant: "destructive" | "warning" = "destructive";
 
-        if (errorMsg === 'interrupted') {
-            // Often happens due to user action (stop button, new generation, etc.)
-            // or sometimes browser internal issues. Don't always show a harsh error toast.
-             console.warn("Speech interrupted. This might be expected if you clicked Stop or changed settings.");
-             // We already reset state in stopSpeechPlayback, so mostly just log here.
-             // Ensure state is correct IF it wasn't stopped by our code.
-             if (isReading) { // Check if we still thought we were reading
-                 setIsReading(false);
-                 utteranceRef.current = null;
-             }
-        } else {
-             // Handle other errors more visibly
-             if (errorMsg === 'synthesis-failed' || errorMsg === 'audio-busy' || errorMsg === 'audio-hardware') {
-                description += " There might be an issue with the speech engine or audio output.";
-            } else if (errorMsg === 'language-unavailable' || errorMsg === 'voice-unavailable') {
-                 description += ` The selected voice or language (${utterance.lang}) might not be fully supported. Try another voice?`;
-            } else if (errorMsg === 'network') {
-                 description += ` A network error occurred, possibly while trying to load a cloud-based voice. Check connection?`;
-            } else if (errorMsg === 'invalid-argument') {
-                description += ` Invalid input for speech synthesis. The script might contain unsupported characters or be too long for the selected voice.`;
-            } else {
-                description += " Please try again or select a different voice."
-            }
-
-            // Use toast ID to prevent spamming the same error
-            const toastId = `speech-error-${errorMsg}`;
-             // Check if this toast is already active using the provided toasts array
-             const isToastActive = toasts.some(t => t.id === toastId && t.open);
-            if (!isToastActive) {
-                 toast({
-                   id: toastId,
-                   variant: 'destructive',
-                   title: 'Speech Error',
-                   description: description,
-                 });
-            }
-              // Reset state on significant errors ONLY IF it wasn't already reset
-              if (isReading) {
-                 setIsReading(false);
-              }
-              utteranceRef.current = null; // Clear ref on error
+        switch (errorMsg) {
+            case 'interrupted':
+                title = 'Speech Interrupted';
+                description = `Playback was interrupted. This might be expected if you clicked Stop, generated a new script, or changed settings.`;
+                variant = "warning";
+                console.warn("Speech interrupted. This is often expected.");
+                // State should already be handled by stopSpeechPlayback if triggered manually
+                if (isReading) setIsReading(false); // Ensure consistency if interrupted externally
+                break;
+            case 'synthesis-failed':
+                description += `The speech engine failed to synthesize the text. The selected voice might be incompatible or corrupted. Try another voice.`;
+                break;
+            case 'audio-busy':
+                description += `The audio output device is busy. Close other audio applications and try again.`;
+                break;
+            case 'audio-hardware':
+                description += `There's an issue with your audio hardware. Check your speakers/headphones.`;
+                break;
+            case 'network':
+                title = 'Network Error';
+                description += `A network error occurred, possibly while trying to load a cloud-based voice. Check your internet connection.`;
+                variant = "warning";
+                break;
+            case 'language-unavailable':
+                description += `The language '${utterance.lang}' is not supported by the selected voice or speech engine.`;
+                break;
+            case 'voice-unavailable':
+                description += `The selected voice '${utterance.voice?.name}' is unavailable or invalid. Please select another voice.`;
+                break;
+             case 'text-toolong':
+                 description += `The script is too long for the speech synthesis engine to process at once. Try generating a shorter script.`;
+                 break;
+             case 'invalid-argument':
+                 description += `An invalid argument was provided to the speech synthesis engine. The script might contain unsupported characters.`;
+                 break;
+            default:
+                description += `An unknown error occurred (${errorMsg}). Please try again or select a different voice.`;
         }
+
+        // Show toast, avoiding duplicates for the same error type
+        const toastId = `speech-error-${errorMsg}`;
+         if (!toasts.some(t => t.id === toastId)) { // Check if toast is already active
+             toast({
+               id: toastId,
+               variant: variant,
+               title: title,
+               description: description,
+               duration: errorMsg === 'interrupted' ? 3000 : 7000, // Shorter duration for interruption info
+             });
+         }
+
+        // Ensure state is cleaned up on error
+        if (isReading) {
+           setIsReading(false);
+        }
+        utteranceRef.current = null; // Clear ref on error
       };
 
       // --- Start speech ---
-      console.log("Calling window.speechSynthesis.speak()...");
+      console.log("Calling window.speechSynthesis.speak() with utterance...");
       window.speechSynthesis.speak(utterance);
+      // NOTE: speak() is asynchronous. The 'onstart' event marks the actual beginning.
 
     } catch (error) {
       console.error('Error within handlePlaybackToggle try-catch block:', error);
       const toastId = 'playback-toggle-catch-error';
-       const isToastActive = toasts.some(t => t.id === toastId && t.open);
-        if (!isToastActive) {
+       if (!toasts.some(t => t.id === toastId)) { // Check if toast is already active
              toast({
                id: toastId,
                variant: 'destructive',
-               title: 'Playback Error',
-               description: `An unexpected error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`,
+               title: 'Unexpected Playback Error',
+               description: `An unexpected error occurred while trying to play the script: ${error instanceof Error ? error.message : 'Unknown error'}`,
              });
-        }
-      stopSpeechPlayback(); // Ensure cleanup on unexpected errors
+       }
+      // Ensure cleanup happens even if the try block fails before speak()
+      stopSpeechPlayback();
     }
   };
 
 
   const handleVoiceChange = (value: string) => {
+       // Check if the selected value is a valid voice URI from the current list
        const selected = availableVoices.find(v => v.voiceURI === value);
        if (selected) {
           setSelectedVoiceURI(value);
-          console.log("Voice selected:", selected.name, `(${selected.lang})`);
-          // Stop playback if running with the old voice
+          console.log("Voice selected:", selected.name, `(${selected.lang}), URI: ${value}`);
+          // Stop playback immediately if running with the old voice
           if (isReading) {
               console.log("Stopping playback due to voice change.");
-              // Introduce a slight delay *before* stopping
-              setTimeout(() => {
-                  stopSpeechPlayback();
-              }, 50);
+              stopSpeechPlayback(); // Use the centralized stop function
           }
+       } else if (value === "" || value === "loading" || value === "no-voices") {
+           // Handle placeholder/disabled selections gracefully
+            console.log(`Placeholder item selected in voice dropdown: ${value}`);
+            setSelectedVoiceURI(undefined); // Clear selection if a placeholder was chosen
+             if (isReading) {
+               stopSpeechPlayback(); // Stop if reading
+             }
        } else {
-           console.warn(`Attempted to select a voice URI (${value}) not in the current list.`);
-           setSelectedVoiceURI(undefined); // Clear selection if invalid
-           toast({ variant: 'warning', title: 'Voice Issue', description: 'Selected voice seems invalid. Please choose another.' });
+           // Handle cases where the selected value might be stale or invalid
+           console.warn(`Attempted to select a voice URI (${value}) that is not currently available or valid for language ${selectedLanguage}. Clearing selection.`);
+           setSelectedVoiceURI(undefined); // Clear selection
+           if (isReading) {
+               stopSpeechPlayback(); // Stop if reading
+           }
+           toast({ variant: 'warning', title: 'Voice Issue', description: 'The previously selected voice is no longer available. Please choose another.' });
        }
   };
 
    // Handler for font size change
    const handleFontSizeChange = (value: number[]) => {
-       setFontSize(value[0]);
+        if (value && value.length > 0 && typeof value[0] === 'number') {
+            const newSize = Math.max(10, Math.min(32, value[0])); // Clamp font size
+             setFontSize(newSize);
+        }
    };
 
 
@@ -607,7 +709,7 @@ export default function Home() {
                 aria-label="Podcast topic keyword"
               />
                {/* Show keyword-specific validation errors from server action */}
-               {state.error && !state.script && state.error.includes('Keyword') && (
+               {state.error && !state.script && state.submittedKeyword === keyword && state.error.toLowerCase().includes('keyword') && (
                 <p className="text-sm text-destructive font-medium">{state.error}</p>
               )}
             </div>
@@ -665,44 +767,62 @@ export default function Home() {
                 {/* Voice Selection Dropdown */}
                 <div className="space-y-2">
                     <Label htmlFor="voice-select" className="font-semibold text-foreground">Voice</Label>
-                    <Select value={selectedVoiceURI || ""} onValueChange={handleVoiceChange} disabled={!areVoicesLoaded || availableVoices.length === 0 || isLoading} name="voice-select">
+                    <Select
+                         value={selectedVoiceURI || ""} // Use empty string if undefined to match SelectItem value
+                         onValueChange={handleVoiceChange}
+                         // Disable if voices are loading OR no voices are available OR the main form is submitting
+                         disabled={!areVoicesLoaded || availableVoices.length === 0 || isLoading}
+                         name="voice-select"
+                     >
                         <SelectTrigger id="voice-select" className="w-full rounded-md shadow-sm" aria-label="Select reading voice">
-                            <SelectValue placeholder={!areVoicesLoaded ? "Loading voices..." : (availableVoices.length > 0 ? "Select a voice..." : `No ${selectedLanguage} voices found`)} />
+                             {/* Dynamic placeholder based on loading state and availability */}
+                            <SelectValue placeholder={
+                                !areVoicesLoaded ? "Loading voices..." :
+                                availableVoices.length > 0 ? "Select a voice..." :
+                                `No voices found for ${selectedLanguage}`
+                            } />
                         </SelectTrigger>
                         <SelectContent className="rounded-md shadow-lg max-h-60 overflow-y-auto">
                             {!areVoicesLoaded ? (
-                                <SelectItem value="loading" disabled>Loading...</SelectItem>
+                                <SelectItem value="loading" disabled className="text-muted-foreground">Loading...</SelectItem>
                             ) : availableVoices.length > 0 ? (
+                                // Map through available voices
                                 availableVoices.map((voice) => (
-                                <SelectItem key={voice.voiceURI} value={voice.voiceURI} className="cursor-pointer">
-                                    {voice.name} ({voice.lang}) {voice.default ? '[Default]' : ''}
-                                </SelectItem>
+                                    <SelectItem key={voice.voiceURI} value={voice.voiceURI} className="cursor-pointer">
+                                        {voice.name} ({voice.lang}) {voice.default ? '[Default]' : ''}
+                                    </SelectItem>
                                 ))
                             ) : (
-                                <SelectItem value="no-voices" disabled>
+                                // Display if no voices found for the language
+                                <SelectItem value="no-voices" disabled className="text-destructive">
                                     No {selectedLanguage} voices found
                                 </SelectItem>
                             )}
                         </SelectContent>
                     </Select>
-                     {!areVoicesLoaded && <p className="text-xs text-muted-foreground">Loading available voices...</p>}
-                     {areVoicesLoaded && availableVoices.length === 0 && <p className="text-xs text-destructive">No voices found for {selectedLanguage}. Playback may not work.</p>}
+                     {/* Helper text below dropdown */}
+                     {!areVoicesLoaded && <p className="text-xs text-muted-foreground pt-1">Loading available voices...</p>}
+                     {areVoicesLoaded && availableVoices.length === 0 && (
+                         <p className="text-xs text-destructive pt-1">
+                             No voices found for {selectedLanguage} in your browser/OS. Playback unavailable.
+                         </p>
+                     )}
                 </div>
 
 
-                 {/* Font Size Slider - Spanning full width on small screens, half on medium+ */}
+                 {/* Font Size Slider - Spanning full width */}
                  <div className="space-y-2 col-span-1 md:col-span-2">
                     <Label htmlFor="fontsize-slider" className="font-semibold text-foreground">Script Font Size ({fontSize}px)</Label>
                     <Slider
                         id="fontsize-slider"
-                        min={12} // Min font size
-                        max={28} // Max font size
+                        min={10} // Min font size
+                        max={32} // Max font size
                         step={1}
                         value={[fontSize]}
                         onValueChange={handleFontSizeChange}
                         disabled={isLoading}
-                        className="w-full"
-                        aria-label="Script font size"
+                        className="w-full cursor-pointer"
+                        aria-label="Adjust script font size"
                     />
                 </div>
             </div>
@@ -711,51 +831,56 @@ export default function Home() {
             {/* Generate Button */}
             <Button
               type="submit"
-              className="w-full bg-accent hover:bg-accent/90 text-accent-foreground font-semibold rounded-md shadow-md transition-all duration-200 ease-in-out transform hover:scale-105"
+              className="w-full bg-accent hover:bg-accent/90 text-accent-foreground font-semibold rounded-md shadow-md transition-all duration-200 ease-in-out transform hover:scale-[1.02] focus:scale-[1.02] focus:ring-2 focus:ring-ring focus:ring-offset-2"
               disabled={isLoading || !keyword.trim()}
-              aria-label="Generate podcast script"
+              aria-label="Generate podcast script based on current settings"
+              aria-live="polite" // Announce changes in loading state
             >
               {isLoading ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> Generating...</>
               ) : (
                 'Generate Script'
               )}
             </Button>
              {/* Display general errors from server action if script wasn't generated */}
              {state.error && !state.script && (
-                 <div className="mt-2 text-sm text-destructive font-medium text-center">
-                    <p>{state.error}</p>
+                 <div className="mt-2 text-sm text-destructive font-medium text-center p-2 bg-destructive/10 rounded-md border border-destructive/30">
+                    <p role="alert">{state.error}</p>
                  </div>
              )}
           </form>
 
-          {/* Script Display Area */}
+          {/* Script Display Area - Only show if script exists */}
           {state.script && (
-            <div className="mt-6 space-y-2">
-              <Label htmlFor="script" className="font-semibold text-foreground">Generated Script</Label>
-              <div className="relative">
+            <div className="mt-8 space-y-2">
+              <Label htmlFor="script-output" className="text-lg font-semibold text-foreground">Generated Script</Label>
+              <div className="relative group/script-area"> {/* Added group name */}
                 <Textarea
-                  id="script"
+                  id="script-output" // Changed ID for clarity
                   value={state.script}
                   readOnly
-                  className="min-h-[300px] bg-secondary rounded-md shadow-inner p-4"
-                  style={{ fontSize: `${fontSize}px`, lineHeight: '1.6' }} // Set font size and line height directly
-                  aria-label="Generated podcast script"
+                  // Apply font size and line height dynamically
+                  style={{ fontSize: `${fontSize}px`, lineHeight: 1.6 }}
+                  // Use Tailwind classes for base styling
+                  className="min-h-[250px] bg-secondary rounded-md shadow-inner p-4 text-base w-full focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+                  aria-label="Generated podcast script text"
+                  aria-live="polite" // Announce script updates
                 />
                  {/* Action Buttons Overlay */}
-                 <div className="absolute top-2 right-2 flex items-center space-x-1 bg-background/70 backdrop-blur-sm p-1 rounded-md shadow">
+                 <div className="absolute top-2 right-2 z-10 flex items-center space-x-1 bg-background/70 backdrop-blur-sm p-1 rounded-md shadow transition-opacity opacity-100 md:opacity-0 md:group-hover/script-area:opacity-100 focus-within:opacity-100">
                     {/* Play/Stop Button */}
                    <Button
                      variant="ghost"
                      size="icon"
-                     className="text-foreground hover:bg-accent/20 disabled:opacity-50"
+                     className="text-foreground hover:bg-accent/20 disabled:opacity-50 disabled:cursor-not-allowed"
                      onClick={handlePlaybackToggle}
                      aria-label={isReading ? "Stop reading script" : "Read script aloud"}
-                     // Disable play if voices aren't loaded, none are available for the lang, or no voice is selected, or no script, or during generation
-                     disabled={isLoading || !areVoicesLoaded || availableVoices.length === 0 || !selectedVoiceURI || !state.script }
-                     title={isReading ? "Stop Playback" : "Read Aloud"}
+                     // Disable conditions: form loading, voices not loaded, no voices for lang, no voice selected, no script text
+                     disabled={isLoading || !areVoicesLoaded || availableVoices.length === 0 || !selectedVoiceURI || !state.script}
+                     title={isReading ? "Stop Playback" : (isLoading ? "Generating..." : (!state.script ? "No script" : (!areVoicesLoaded ? "Voices loading..." : (availableVoices.length === 0 ? `No ${selectedLanguage} voices` : (!selectedVoiceURI ? "Select voice" : "Read Aloud")))))} // Detailed title
+                     aria-live="polite" // Announce reading state changes
                    >
-                     {isReading ? <Square className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                     {isReading ? <Square className="h-5 w-5" aria-hidden="true"/> : <Play className="h-5 w-5" aria-hidden="true"/>}
                    </Button>
                     {/* Copy Button */}
                     <Button
@@ -767,7 +892,7 @@ export default function Home() {
                         disabled={isLoading || !state.script}
                         title="Copy Script"
                     >
-                        <Copy className="h-5 w-5" />
+                        <Copy className="h-5 w-5" aria-hidden="true"/>
                     </Button>
                      {/* Download Text Button */}
                      <Button
@@ -779,30 +904,32 @@ export default function Home() {
                         disabled={isLoading || !state.script}
                         title="Download Script (.txt)"
                       >
-                        <Download className="h-5 w-5" />
+                        <Download className="h-5 w-5" aria-hidden="true"/>
                      </Button>
                      {/* Download Audio Button (Placeholder/Disabled) */}
                      <Button
                         variant="ghost"
                         size="icon"
-                        className="text-foreground hover:bg-accent/20 disabled:opacity-50"
+                        className="text-foreground hover:bg-accent/20 disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={handleDownloadAudio}
-                        aria-label="Download script as audio file"
-                        // Disable audio download if no script or no voice selected
+                        aria-label="Download script as audio file (Feature not available)"
+                        // Disable audio download if no script or no voice selected, or generally unavailable
                         disabled={isLoading || !state.script || !selectedVoiceURI || !areVoicesLoaded || availableVoices.length === 0}
-                        title="Download Audio (Feature Unavailable)" // Updated title
+                        title="Download Audio (Feature Unavailable)"
                       >
-                        <AudioWaveform className="h-5 w-5" />
+                        <AudioWaveform className="h-5 w-5" aria-hidden="true"/>
                      </Button>
                  </div>
               </div>
             </div>
           )}
         </CardContent>
-        <CardFooter className="text-xs text-muted-foreground justify-center pt-4">
-          Powered by Generative AI
+        <CardFooter className="text-xs text-muted-foreground justify-center pt-4 border-t mt-4">
+          Powered by Generative AI & Browser Speech Synthesis
         </CardFooter>
       </Card>
     </main>
   );
 }
+
+    
