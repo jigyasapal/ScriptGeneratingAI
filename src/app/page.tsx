@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { Copy, Download, Loader2, Play, Square } from 'lucide-react'; // Removed Volume icons
+import { Copy, Download, Loader2, Play, Square } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { generateScriptAction, type GenerateScriptActionState } from './actions';
 import type { ScriptLength } from '@/ai/flows/podcast-script-generation';
@@ -205,32 +205,34 @@ export default function Home() {
      // Always clear the ref, even if cancel didn't run (e.g., utterance ended naturally)
     utteranceRef.current = null;
 
-    if (stopped) {
-        setIsReading(false); // Update state only if something was actually stopped
+    if (stopped || isReading) { // Update state if we stopped or thought we were reading
+        setIsReading(false);
     }
   };
 
 
   // Restore form fields on error
    useEffect(() => {
-        if (state.error && state.submittedKeyword) {
-            setKeyword(state.submittedKeyword);
+        // Note: Directly accessing state properties might lead to type issues if not defined in GenerateScriptActionState
+        const prevState = state as GenerateScriptActionState & { submittedTone?: EmotionTone, submittedLanguage?: Language };
+
+        if (prevState.error && prevState.submittedKeyword) {
+            setKeyword(prevState.submittedKeyword);
         }
-        if (state.error && state.submittedLength) {
-            setSelectedLength(state.submittedLength);
+        if (prevState.error && prevState.submittedLength) {
+            setSelectedLength(prevState.submittedLength);
         }
-         if (state.error && state.submittedTone) {
-            setSelectedTone(state.submittedTone);
+         if (prevState.error && prevState.submittedTone) {
+            setSelectedTone(prevState.submittedTone);
         }
-         // Use 'as Language' for type assertion if state.submittedLanguage is potentially undefined or string
-         if (state.error && state.submittedLanguage) {
-            const lang = state.submittedLanguage as Language;
+         if (prevState.error && prevState.submittedLanguage) {
+            const lang = prevState.submittedLanguage;
              if (['en', 'hi'].includes(lang)) {
                setSelectedLanguage(lang);
              }
          }
    // eslint-disable-next-line react-hooks/exhaustive-deps
-   }, [state.error, state.submittedKeyword, state.submittedLength, state.submittedTone, state.submittedLanguage]);
+   }, [state.error, state.submittedKeyword, state.submittedLength, (state as any).submittedTone, (state as any).submittedLanguage]);
 
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -238,8 +240,9 @@ export default function Home() {
   };
 
   const handleLengthChange = (value: string) => {
-    // Add 'hour' to the list of valid lengths
-    if (value === 'short' || value === 'medium' || value === 'long' || value === 'hour') {
+    // Update valid lengths to include 'hour'
+    const validLengths: ScriptLength[] = ['short', 'medium', 'long', 'hour'];
+    if (validLengths.includes(value as ScriptLength)) {
       setSelectedLength(value as ScriptLength);
     } else {
         setSelectedLength('medium'); // Default fallback
@@ -271,8 +274,9 @@ export default function Home() {
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    stopSpeechPlayback();
+    stopSpeechPlayback(); // Ensure any ongoing speech is stopped before generating new script
     const formData = new FormData(event.currentTarget);
+    // Make sure 'length', 'tone', and 'language' are explicitly set from state
     formData.set('length', selectedLength);
     formData.set('tone', selectedTone);
     formData.set('language', selectedLanguage);
@@ -315,7 +319,7 @@ export default function Home() {
     if (isReading) {
       console.log('Stopping playback...');
       stopSpeechPlayback();
-      setIsReading(false); // Ensure state is updated
+      // No need to setIsReading(false) here, stopSpeechPlayback handles it
       return;
     }
 
@@ -352,7 +356,7 @@ export default function Home() {
 
     try {
       // **CRITICAL**: Cancel any ongoing or pending speech BEFORE creating a new utterance.
-      // This is often necessary to prevent unexpected behavior or errors like "interrupted".
+      // This helps prevent the "interrupted" error.
       if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
           console.log("Cancelling existing/pending speech before starting new one.");
           window.speechSynthesis.cancel();
@@ -421,31 +425,35 @@ export default function Home() {
 
         let description = `Could not read the script. Error: ${errorMsg}.`;
          if (errorMsg === 'interrupted') {
-            description = "Playback was interrupted. This might happen if you clicked play/stop quickly or changed settings.";
-            console.warn("Speech interrupted, possibly by user action or rapid state changes.");
-        } else if (errorMsg === 'synthesis-failed' || errorMsg === 'audio-busy' || errorMsg === 'audio-hardware') {
-            description += " There might be an issue with the speech engine or audio output.";
-        } else if (errorMsg === 'language-unavailable' || errorMsg === 'voice-unavailable') {
-             description += ` The selected voice or language (${utterance.lang}) might not be fully supported. Try another voice?`;
-        } else if (errorMsg === 'network') {
-             description += ` A network error occurred, possibly while trying to load a cloud-based voice. Check connection?`;
+            // Don't necessarily show a user-facing error for "interrupted" if it's likely due to intentional stop.
+            console.warn("Speech interrupted, possibly by user action (stop button, new generation, etc.).");
+            // Optionally, show a subtle notification only if it wasn't clearly user-initiated? For now, just log it.
         } else {
-            description += " Please try again or select a different voice."
+             // Handle other errors more visibly
+             if (errorMsg === 'synthesis-failed' || errorMsg === 'audio-busy' || errorMsg === 'audio-hardware') {
+                description += " There might be an issue with the speech engine or audio output.";
+            } else if (errorMsg === 'language-unavailable' || errorMsg === 'voice-unavailable') {
+                 description += ` The selected voice or language (${utterance.lang}) might not be fully supported. Try another voice?`;
+            } else if (errorMsg === 'network') {
+                 description += ` A network error occurred, possibly while trying to load a cloud-based voice. Check connection?`;
+            } else {
+                description += " Please try again or select a different voice."
+            }
+
+            // Use toast ID to prevent spamming the same error
+            const toastId = `speech-error-${errorMsg}`;
+            const isToastActive = toasts.some(t => t.id === toastId && t.open);
+            if (!isToastActive) {
+                 toast({
+                   id: toastId,
+                   variant: 'destructive',
+                   title: 'Speech Error',
+                   description: description,
+                 });
+            }
         }
 
-        // Use toast ID to prevent spamming the same error
-        const toastId = `speech-error-${errorMsg}`;
-        const isToastActive = toasts.some(t => t.id === toastId && t.open);
-        if (!isToastActive) {
-             toast({
-               id: toastId,
-               variant: 'destructive',
-               title: 'Speech Error',
-               description: description,
-             });
-        }
-
-        // Reset state on error
+        // Reset state on error, regardless of whether a toast was shown
         setIsReading(false);
         utteranceRef.current = null;
       };
@@ -454,8 +462,7 @@ export default function Home() {
       console.log("Calling window.speechSynthesis.speak()...");
       window.speechSynthesis.speak(utterance);
       // Note: speak() is asynchronous. The onstart event confirms when it actually begins.
-      // Set reading state immediately? Or wait for onstart? Waiting for onstart is more accurate.
-      // setIsReading(true); // Let's move this to onstart for better accuracy
+      // Setting state here might be premature if speak() fails immediately, but onstart handles the success case.
 
     } catch (error) {
       console.error('Error within handlePlaybackToggle try-catch block:', error);
@@ -471,7 +478,7 @@ export default function Home() {
         }
       // Ensure state is reset and speech is stopped if an error occurs during setup
       stopSpeechPlayback();
-       setIsReading(false);
+      // setIsReading(false); // stopSpeechPlayback already handles this
     }
   };
 
@@ -527,7 +534,7 @@ export default function Home() {
                 aria-label="Podcast topic keyword"
               />
                {/* Show keyword-specific validation errors from server action */}
-              {state.error && !state.script && state.error.toLowerCase().includes('keyword') && (
+               {state.error && !state.script && !state.error.toLowerCase().includes('tone') && !state.error.toLowerCase().includes('language') && !state.error.toLowerCase().includes('length') && (
                 <p className="text-sm text-destructive font-medium">{state.error}</p>
               )}
             </div>
@@ -641,8 +648,8 @@ export default function Home() {
                 'Generate Script'
               )}
             </Button>
-             {/* Display general errors from server action if script wasn't generated */}
-             {state.error && !state.script && (
+             {/* Display general errors from server action if script wasn't generated and it's not a specific field error */}
+             {state.error && !state.script && !state.error.toLowerCase().includes('keyword') && !state.error.toLowerCase().includes('length') && !state.error.toLowerCase().includes('tone') && !state.error.toLowerCase().includes('language') && (
                  <div className="mt-2 text-sm text-destructive font-medium text-center">
                     <p>{state.error}</p>
                  </div>
@@ -704,8 +711,6 @@ export default function Home() {
               </div>
             </div>
           )}
-           {/* Fallback for general errors ONLY if script didn't generate AND no keyword was submitted (rare case) */}
-           {/* {state.error && !state.script && !state.submittedKeyword && <p className="mt-4 text-center text-sm text-destructive font-medium">{state.error}</p>} */}
         </CardContent>
         <CardFooter className="text-xs text-muted-foreground justify-center pt-4">
           Powered by Generative AI
