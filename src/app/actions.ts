@@ -4,13 +4,17 @@ import {
   generatePodcastScript,
   type GeneratePodcastScriptInput,
   type ScriptLength,
+  type EmotionTone, // Import EmotionTone
+  type Language,    // Import Language
 } from '@/ai/flows/podcast-script-generation';
 import {z} from 'genkit';
 
-// Define the schema matching the flow's input, including length
+// Define the schema matching the flow's input, including length, tone, and language
 const GenerateScriptInputSchema = z.object({
   keyword: z.string().min(1, {message: 'Keyword cannot be empty.'}),
-  length: z.enum(['short', 'medium', 'long']).default('medium'), // Add length with default
+  length: z.enum(['short', 'medium', 'long', 'hour']).default('medium'), // Add 'hour'
+  tone: z.enum(['neutral', 'happy', 'sad', 'excited', 'formal', 'casual']).default('neutral'), // Add tone
+  language: z.enum(['en', 'hi']).default('en'), // Add language
 });
 
 export interface GenerateScriptActionState {
@@ -18,6 +22,8 @@ export interface GenerateScriptActionState {
   error?: string;
   submittedKeyword?: string;
   submittedLength?: ScriptLength;
+  submittedTone?: EmotionTone; // Add submitted tone
+  submittedLanguage?: Language; // Add submitted language
 }
 
 export async function generateScriptAction(
@@ -26,24 +32,33 @@ export async function generateScriptAction(
 ): Promise<GenerateScriptActionState> {
   const validatedFields = GenerateScriptInputSchema.safeParse({
     keyword: formData.get('keyword'),
-    length: (formData.get('length') as ScriptLength) || 'medium', // Get length from form, default if missing
+    length: (formData.get('length') as ScriptLength) || 'medium',
+    tone: (formData.get('tone') as EmotionTone) || 'neutral', // Get tone from form, default if missing
+    language: (formData.get('language') as Language) || 'en', // Get language from form, default if missing
   });
 
   if (!validatedFields.success) {
-    // Combine keyword and length errors if necessary, though length should have a default
-    const keywordError = validatedFields.error.flatten().fieldErrors.keyword?.[0];
-    const lengthError = validatedFields.error.flatten().fieldErrors.length?.[0];
-    const error = [keywordError, lengthError].filter(Boolean).join(' ');
+    // Combine errors if necessary
+    const errors = validatedFields.error.flatten().fieldErrors;
+    const keywordError = errors.keyword?.[0];
+    const lengthError = errors.length?.[0];
+    const toneError = errors.tone?.[0];
+    const languageError = errors.language?.[0];
+    const error = [keywordError, lengthError, toneError, languageError].filter(Boolean).join(' ');
     return {
       error: error || 'Invalid input.', // Fallback error message
       submittedKeyword: formData.get('keyword') as string,
       submittedLength: (formData.get('length') as ScriptLength) || 'medium',
+      submittedTone: (formData.get('tone') as EmotionTone) || 'neutral',
+      submittedLanguage: (formData.get('language') as Language) || 'en',
     };
   }
 
   const input: GeneratePodcastScriptInput = {
     keyword: validatedFields.data.keyword,
-    length: validatedFields.data.length, // Pass validated length
+    length: validatedFields.data.length,
+    tone: validatedFields.data.tone, // Pass validated tone
+    language: validatedFields.data.language, // Pass validated language
   };
 
   try {
@@ -54,6 +69,8 @@ export async function generateScriptAction(
       script: result.script,
       submittedKeyword: input.keyword,
       submittedLength: input.length,
+      submittedTone: input.tone,
+      submittedLanguage: input.language,
     };
   } catch (error) {
     console.error('Error generating podcast script:', error);
@@ -66,6 +83,8 @@ export async function generateScriptAction(
       error: errorMessage,
       submittedKeyword: input.keyword,
       submittedLength: input.length,
+      submittedTone: input.tone,
+      submittedLanguage: input.language,
     };
   }
 }

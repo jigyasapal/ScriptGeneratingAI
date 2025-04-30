@@ -3,21 +3,34 @@
 /**
  * @fileOverview Podcast script generation flow.
  *
- * - generatePodcastScript - A function that generates a podcast script based on a keyword and desired length.
+ * - generatePodcastScript - A function that generates a podcast script based on a keyword, desired length, tone, and language.
  * - GeneratePodcastScriptInput - The input type for the generatePodcastScript function.
  * - GeneratePodcastScriptOutput - The return type for the generatePodcastScript function.
+ * - ScriptLength - Type alias for script length options.
+ * - EmotionTone - Type alias for emotion tone options.
+ * - Language - Type alias for language options.
  */
 
 import {ai} from '@/ai/ai-instance';
 import {z} from 'genkit';
 
 // Define the possible script lengths
-const ScriptLengthEnum = z.enum(['short', 'medium', 'long']);
+const ScriptLengthEnum = z.enum(['short', 'medium', 'long', 'hour']);
 export type ScriptLength = z.infer<typeof ScriptLengthEnum>;
+
+// Define the possible emotion tones
+const EmotionToneEnum = z.enum(['neutral', 'happy', 'sad', 'excited', 'formal', 'casual']);
+export type EmotionTone = z.infer<typeof EmotionToneEnum>;
+
+// Define the supported languages
+const LanguageEnum = z.enum(['en', 'hi']);
+export type Language = z.infer<typeof LanguageEnum>;
 
 const GeneratePodcastScriptInputSchema = z.object({
   keyword: z.string().describe('The keyword for the podcast script topic.'),
-  length: ScriptLengthEnum.default('medium').describe('The desired length of the podcast script (short: ~1-2 mins, medium: ~3-5 mins, long: ~6-8 mins).'),
+  length: ScriptLengthEnum.default('medium').describe('The desired length of the podcast script (short: ~1-2 mins, medium: ~3-5 mins, long: ~6-8 mins, hour: ~45-60 mins).'),
+  tone: EmotionToneEnum.default('neutral').describe('The desired emotional tone of the podcast script.'),
+  language: LanguageEnum.default('en').describe('The language for the podcast script (en: English, hi: Hindi).'),
 });
 export type GeneratePodcastScriptInput = z.infer<typeof GeneratePodcastScriptInputSchema>;
 
@@ -27,7 +40,7 @@ const GeneratePodcastScriptOutputSchema = z.object({
 export type GeneratePodcastScriptOutput = z.infer<typeof GeneratePodcastScriptOutputSchema>;
 
 export async function generatePodcastScript(input: GeneratePodcastScriptInput): Promise<GeneratePodcastScriptOutput> {
-  // Ensure length is provided, defaulting if necessary
+  // Ensure all fields are provided, defaulting if necessary
   const validatedInput = GeneratePodcastScriptInputSchema.parse(input);
   return generatePodcastScriptFlow(validatedInput);
 }
@@ -40,32 +53,34 @@ const prompt = ai.definePrompt({
   output: {
     schema: GeneratePodcastScriptOutputSchema,
   },
-  prompt: `You are a podcast script writer tasked with creating engaging content. Generate a full podcast script based on the provided keyword and desired length. The script should include an introduction, main content sections, and a conclusion, flowing naturally like spoken conversation.
+  prompt: `You are a podcast script writer tasked with creating engaging content. Generate a full podcast script based on the provided keyword, desired length, tone, and language. The script should include an introduction, main content sections, and a conclusion, flowing naturally like spoken conversation.
 
 **Keyword:** {{{keyword}}}
-**Desired Length:** {{{length}}} (Interpret this as: short ≈ 1-2 minutes speaking time, medium ≈ 3-5 minutes, long ≈ 6-8 minutes). Adjust the depth of content, number of examples, and overall detail accordingly.
+**Desired Length:** {{{length}}} (Interpret this as: short ≈ 1-2 minutes, medium ≈ 3-5 minutes, long ≈ 6-8 minutes, hour ≈ 45-60 minutes speaking time). Adjust the depth of content, number of examples, and overall detail accordingly.
+**Desired Tone:** {{{tone}}} (Apply this tone consistently throughout the script.)
+**Language:** {{{language}}} (Write the entire script in this language. For 'hi', use Devanagari script.)
 
-**Tone and Style:**
-*   Adopt a **conversational and engaging human tone**. Write as if a real person is speaking naturally to an audience.
-*   Use language that is accessible and easy to understand, avoiding overly robotic or formal phrasing.
-*   Incorporate natural pauses and rhythms of speech through punctuation and sentence structure.
-*   Use contractions (like "don't", "it's", "we're") where appropriate for a natural flow.
+**Tone and Style Guidance:**
+*   Adopt a **conversational and engaging human tone** suitable for the requested **{{{tone}}}**. Write as if a real person is speaking naturally to an audience in the specified **{{{language}}}**.
+*   Use language that is accessible and easy to understand for the target language, avoiding overly robotic or formal phrasing unless the requested tone is 'formal'.
+*   Incorporate natural pauses and rhythms of speech through punctuation and sentence structure appropriate for the **{{{language}}}**.
+*   Use contractions (like "don't", "it's", "we're" for English, or colloquialisms for Hindi) where appropriate for a natural flow, unless 'formal' tone is requested.
 *   Aim for a style that is informative yet captivating, making the listener feel involved.
 
 **CRITICAL OUTPUT INSTRUCTIONS:**
-1.  **Spoken Words ONLY:** The output MUST contain ONLY the words intended to be spoken aloud by the podcast host. This output will be fed directly into a text-to-speech (TTS) engine.
+1.  **Spoken Words ONLY:** The output MUST contain ONLY the words intended to be spoken aloud by the podcast host in the specified **{{{language}}}**. This output will be fed directly into a text-to-speech (TTS) engine.
 2.  **ABSOLUTELY NO Extra Elements:** Do NOT include any of the following:
     *   Speaker names (e.g., "Host:", "Guest:")
     *   Stage directions (e.g., "[upbeat music fades]", "(pauses briefly)", "[sound of typing]")
     *   Sound effect cues (e.g., "[SFX: door creaks]")
-    *   Titles or headings (e.g., "Podcast Script:", "Introduction", "Section 1")
+    *   Titles or headings (e.g., "Podcast Script:", "Introduction", "Section 1", "शीर्षक", "परिचय")
     *   Comments or notes (e.g., "// Remember to emphasize this", "<!-- Check source -->")
     *   Timestamps or section markers (e.g., "[00:30]", "== Section 2 ==")
     *   Any introductory or concluding remarks *about* the script itself (e.g., "Here is the script:", "End of script.")
     *   Any other non-spoken text.
-3.  **Formatting:** Use paragraphs to structure the script for readability. Ensure line breaks occur naturally within the spoken dialogue.
+3.  **Formatting:** Use paragraphs to structure the script for readability. Ensure line breaks occur naturally within the spoken dialogue. For Hindi ('hi'), use Devanagari script ONLY.
 
-Generate the podcast script now, adhering strictly to the tone, length guidance, and **CRITICAL OUTPUT INSTRUCTIONS**. The entire output should be only the spoken words.`,
+Generate the podcast script now, adhering strictly to the keyword, length, tone, language, and **CRITICAL OUTPUT INSTRUCTIONS**. The entire output should be only the spoken words in the correct language and script.`,
 });
 
 
@@ -79,7 +94,7 @@ const generatePodcastScriptFlow = ai.defineFlow<
     outputSchema: GeneratePodcastScriptOutputSchema,
   },
   async input => {
-    console.log(`Generating script for keyword: "${input.keyword}", length: ${input.length}`);
+    console.log(`Generating script for keyword: "${input.keyword}", length: ${input.length}, tone: ${input.tone}, language: ${input.language}`);
     try {
         const {output} = await prompt(input);
 
@@ -102,11 +117,11 @@ const generatePodcastScriptFlow = ai.defineFlow<
         return { script: finalScript };
 
     } catch(error) {
-        console.error(`Error in generatePodcastScriptFlow for keyword "${input.keyword}", length "${input.length}":`, error);
+        console.error(`Error in generatePodcastScriptFlow for keyword "${input.keyword}", length "${input.length}", tone "${input.tone}", language "${input.language}":`, error);
         // Re-throw a more user-friendly error or let the calling action handle it.
         // Avoid exposing internal error details directly if possible.
         if (error instanceof Error && error.message.includes("blocked")) {
-             throw new Error("Script generation failed due to content safety filters. Please try a different keyword or length.");
+             throw new Error("Script generation failed due to content safety filters. Please try a different keyword, length, or tone.");
         }
          throw new Error("An unexpected error occurred while generating the script.");
     }
