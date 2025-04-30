@@ -8,9 +8,8 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, React.ComponentProps<'tex
       <textarea
         className={cn(
           'flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm',
-          // Customizations for script display
-          'leading-relaxed', // Improve line spacing
-          'whitespace-pre-wrap', // Preserve line breaks and wrap text
+          // Removed custom classes: 'leading-relaxed', 'whitespace-pre-wrap'
+          // These will be applied via style prop where needed.
           className
         )}
         ref={ref}
