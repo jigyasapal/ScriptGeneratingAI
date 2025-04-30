@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { Copy, Download, Loader2, Play, Square } from 'lucide-react';
+import { Copy, Download, Loader2, Play, Square, AudioWaveform } from 'lucide-react'; // Added AudioWaveform
 import { useToast } from '@/hooks/use-toast';
 import { generateScriptAction, type GenerateScriptActionState } from './actions';
 import type { ScriptLength } from '@/ai/flows/podcast-script-generation';
@@ -19,7 +19,7 @@ import type { ScriptLength } from '@/ai/flows/podcast-script-generation';
 export type EmotionTone = 'neutral' | 'happy' | 'sad' | 'excited' | 'formal' | 'casual';
 export type Language = 'en' | 'hi';
 
-// Helper function to create a downloadable file
+// Helper function to create a downloadable text file
 const downloadFile = (filename: string, text: string) => {
   const element = document.createElement('a');
   element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
@@ -88,6 +88,7 @@ export default function Home() {
         startVoiceCheckInterval();
     } else {
         console.warn('Speech Synthesis not supported.');
+        setAreVoicesLoaded(true); // Mark as loaded to avoid infinite loading state
     }
 
     return cleanup; // Return cleanup function
@@ -311,6 +312,74 @@ export default function Home() {
     }
   };
 
+  // Placeholder for Audio Download
+  const handleDownloadAudio = () => {
+    // Check if a script exists
+    if (!state.script) {
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'No script available to generate audio.',
+      });
+      return;
+    }
+    // Check if a voice is selected
+    if (!selectedVoiceURI) {
+        toast({
+            variant: 'destructive',
+            title: 'Voice Not Selected',
+            description: `Please select a voice for ${selectedLanguage} to download the audio.`,
+        });
+        return;
+    }
+
+    // Explain limitation: Browser TTS cannot directly generate downloadable audio files.
+    toast({
+      variant: 'warning', // Use warning or info variant
+      title: 'Audio Download Unavailable',
+      description: 'Direct audio download requires a backend Text-to-Speech service. This feature is not implemented in the current version.',
+      duration: 5000, // Show for a bit longer
+    });
+
+    // In a real implementation, you would:
+    // 1. Send `state.script`, `selectedLanguage`, `selectedTone`, and perhaps `selectedVoiceURI` (or voice name/identifier) to a backend API endpoint.
+    // 2. The backend would use a cloud TTS service (like Google Cloud Text-to-Speech, AWS Polly, etc.) to generate the audio file (e.g., MP3 or WAV).
+    // 3. The backend would respond with the audio file (e.g., as a blob or a URL to the generated file).
+    // 4. The frontend would then trigger a download of the received audio file.
+    // Example (conceptual):
+    // try {
+    //   setAudioDownloading(true); // Add loading state for the button
+    //   const response = await fetch('/api/generate-audio', {
+    //     method: 'POST',
+    //     headers: { 'Content-Type': 'application/json' },
+    //     body: JSON.stringify({
+    //       text: state.script,
+    //       language: selectedLanguage,
+    //       voice: selectedVoiceURI, // Or a preferred voice identifier
+    //       tone: selectedTone, // If backend supports it
+    //     }),
+    //   });
+    //   if (!response.ok) throw new Error('Audio generation failed');
+    //   const blob = await response.blob();
+    //   const url = window.URL.createObjectURL(blob);
+    //   const a = document.createElement('a');
+    //   a.style.display = 'none';
+    //   a.href = url;
+    //   const filename = `${state.submittedKeyword || 'podcast'}_${selectedLanguage}_${selectedTone}.mp3`;
+    //   a.download = filename;
+    //   document.body.appendChild(a);
+    //   a.click();
+    //   window.URL.revokeObjectURL(url);
+    //   document.body.removeChild(a);
+    //   toast({ title: 'Success!', description: `Audio downloaded as ${filename}` });
+    // } catch (error) {
+    //   console.error("Audio download error:", error);
+    //   toast({ variant: 'destructive', title: 'Audio Download Failed', description: error.message || 'Could not generate audio.' });
+    // } finally {
+    //   setAudioDownloading(false);
+    // }
+  };
+
 
   // Combined Play/Stop Handler
  const handlePlaybackToggle = async () => {
@@ -361,7 +430,8 @@ export default function Home() {
           console.log("Cancelling existing/pending speech before starting new one.");
           window.speechSynthesis.cancel();
           // Short delay to allow the browser's speech queue to clear, might help on some systems.
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // Adjust timing if needed, or remove if it causes other issues.
+          await new Promise(resolve => setTimeout(resolve, 150)); // Increased delay slightly
       }
 
 
@@ -425,9 +495,15 @@ export default function Home() {
 
         let description = `Could not read the script. Error: ${errorMsg}.`;
          if (errorMsg === 'interrupted') {
-            // Don't necessarily show a user-facing error for "interrupted" if it's likely due to intentional stop.
-            console.warn("Speech interrupted, possibly by user action (stop button, new generation, etc.).");
+            // Don't necessarily show a user-facing error for "interrupted" if it's likely due to intentional stop/change.
+            console.warn("Speech interrupted, possibly by user action (stop button, new generation, voice change, etc.).");
             // Optionally, show a subtle notification only if it wasn't clearly user-initiated? For now, just log it.
+            // Check if speech was supposed to be reading. If it was stopped externally, `isReading` might still be true.
+             if (isReading) {
+                 // If we thought we were reading, but got interrupted, reset state.
+                 setIsReading(false);
+                 utteranceRef.current = null;
+             }
         } else {
              // Handle other errors more visibly
              if (errorMsg === 'synthesis-failed' || errorMsg === 'audio-busy' || errorMsg === 'audio-hardware') {
@@ -436,7 +512,10 @@ export default function Home() {
                  description += ` The selected voice or language (${utterance.lang}) might not be fully supported. Try another voice?`;
             } else if (errorMsg === 'network') {
                  description += ` A network error occurred, possibly while trying to load a cloud-based voice. Check connection?`;
-            } else {
+            } else if (errorMsg === 'invalid-argument') {
+                description += ` Invalid input for speech synthesis. The script might contain unsupported characters or be too long for the selected voice.`;
+            }
+            else {
                 description += " Please try again or select a different voice."
             }
 
@@ -451,11 +530,12 @@ export default function Home() {
                    description: description,
                  });
             }
+              // Reset state on significant errors, regardless of whether a toast was shown
+              setIsReading(false);
+              utteranceRef.current = null;
         }
 
-        // Reset state on error, regardless of whether a toast was shown
-        setIsReading(false);
-        utteranceRef.current = null;
+
       };
 
       // --- Start speech ---
@@ -491,7 +571,11 @@ export default function Home() {
           // Stop playback if running with the old voice
           if (isReading) {
               console.log("Stopping playback due to voice change.");
-              stopSpeechPlayback();
+              // Introduce a slight delay *before* stopping to potentially avoid race conditions
+              // with the browser's speech queue, though this is experimental.
+              setTimeout(() => {
+                  stopSpeechPlayback();
+              }, 50); // Small delay
           }
        } else {
            console.warn(`Attempted to select a voice URI (${value}) not in the current list.`);
@@ -678,7 +762,8 @@ export default function Home() {
                      className="text-foreground hover:bg-accent/20 disabled:opacity-50"
                      onClick={handlePlaybackToggle}
                      aria-label={isReading ? "Stop reading script" : "Read script aloud"}
-                     disabled={isLoading || !areVoicesLoaded || availableVoices.length === 0 || !selectedVoiceURI || !state.script}
+                     // Disable play if voices aren't loaded, none are available for the lang, or no voice is selected, or no script, or during generation
+                     disabled={isLoading || !areVoicesLoaded || availableVoices.length === 0 || !selectedVoiceURI || !state.script }
                      title={isReading ? "Stop Playback" : "Read Aloud"}
                    >
                      {isReading ? <Square className="h-5 w-5" /> : <Play className="h-5 w-5" />}
@@ -695,7 +780,7 @@ export default function Home() {
                     >
                         <Copy className="h-5 w-5" />
                     </Button>
-                     {/* Download Button */}
+                     {/* Download Text Button */}
                      <Button
                         variant="ghost"
                         size="icon"
@@ -706,6 +791,19 @@ export default function Home() {
                         title="Download Script (.txt)"
                       >
                         <Download className="h-5 w-5" />
+                     </Button>
+                     {/* Download Audio Button (Placeholder/Disabled) */}
+                     <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-foreground hover:bg-accent/20 disabled:opacity-50"
+                        onClick={handleDownloadAudio}
+                        aria-label="Download script as audio file"
+                        // Disable audio download if no script or no voice selected
+                        disabled={isLoading || !state.script || !selectedVoiceURI || !areVoicesLoaded || availableVoices.length === 0}
+                        title="Download Audio (Feature Unavailable)" // Updated title
+                      >
+                        <AudioWaveform className="h-5 w-5" />
                      </Button>
                  </div>
               </div>
@@ -719,4 +817,3 @@ export default function Home() {
     </main>
   );
 }
-
