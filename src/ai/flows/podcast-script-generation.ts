@@ -7,7 +7,7 @@
  * - GeneratePodcastScriptInput - The input type for the generatePodcastScript function.
  * - GeneratePodcastScriptOutput - The return type for the generatePodcastScript function.
  * - ScriptLength - Type alias for script length options.
- * - EmotionTone - Type alias for emotion tone options.
+ * - ConversationTone - Type alias for conversation tone options.
  * - Language - Type alias for language options.
  */
 
@@ -18,19 +18,30 @@ import {z} from 'genkit';
 const ScriptLengthEnum = z.enum(['short', 'medium', 'long', 'hour']);
 export type ScriptLength = z.infer<typeof ScriptLengthEnum>;
 
-// Define the possible emotion tones
-const EmotionToneEnum = z.enum(['neutral', 'happy', 'sad', 'excited', 'formal', 'casual']);
-export type EmotionTone = z.infer<typeof EmotionToneEnum>;
+// Define the possible conversation tones
+const ConversationToneEnum = z.enum([
+    'neutral',
+    'conversational', // Added
+    'calm',          // Added
+    'friendly',      // Added
+    'professional',  // Renamed/clarified from 'formal'
+    'enthusiastic',  // Renamed/clarified from 'excited'
+    'informative',   // Added
+    'humorous',      // Added
+    'empathetic',    // Renamed/clarified from 'sad' - broadened scope
+    'upbeat'         // Renamed/clarified from 'happy'
+]);
+export type ConversationTone = z.infer<typeof ConversationToneEnum>;
 
 // Define the supported languages
-const LanguageEnum = z.enum(['en', 'hi']);
+const LanguageEnum = z.enum(['en', 'hi', 'es', 'fr', 'de']);
 export type Language = z.infer<typeof LanguageEnum>;
 
 const GeneratePodcastScriptInputSchema = z.object({
   keyword: z.string().describe('The keyword for the podcast script topic.'),
   length: ScriptLengthEnum.default('medium').describe('The desired length of the podcast script (short: ~1-2 mins, medium: ~3-5 mins, long: ~6-8 mins, hour: ~45-60 mins).'),
-  tone: EmotionToneEnum.default('neutral').describe('The desired emotional tone of the podcast script.'),
-  language: LanguageEnum.default('en').describe('The language for the podcast script (en: English, hi: Hindi).'),
+  tone: ConversationToneEnum.default('conversational').describe('The desired conversational tone of the podcast script.'),
+  language: LanguageEnum.default('en').describe('The language for the podcast script (en: English, hi: Hindi, es: Spanish, fr: French, de: German).'),
 });
 export type GeneratePodcastScriptInput = z.infer<typeof GeneratePodcastScriptInputSchema>;
 
@@ -53,34 +64,36 @@ const prompt = ai.definePrompt({
   output: {
     schema: GeneratePodcastScriptOutputSchema,
   },
-  prompt: `You are a podcast script writer tasked with creating engaging content. Generate a full podcast script based on the provided keyword, desired length, tone, and language. The script should include an introduction, main content sections, and a conclusion, flowing naturally like spoken conversation.
+  prompt: `You are a podcast script writer tasked with creating engaging content with a distinctly human and natural-sounding voice. Generate a full podcast script based on the provided keyword, desired length, tone, and language. The script should include an introduction, main content sections, and a conclusion, flowing naturally like a real person speaking.
 
 **Keyword:** {{{keyword}}}
 **Desired Length:** {{{length}}} (Interpret this as: short ≈ 1-2 minutes, medium ≈ 3-5 minutes, long ≈ 6-8 minutes, hour ≈ 45-60 minutes speaking time). Adjust the depth of content, number of examples, and overall detail accordingly.
-**Desired Tone:** {{{tone}}} (Apply this tone consistently throughout the script.)
-**Language:** {{{language}}} (Write the entire script in this language. For 'hi', use Devanagari script.)
+**Desired Tone:** {{{tone}}} (Apply this tone consistently throughout the script. Focus on making it sound like genuine human speech, not written text.)
+**Language:** {{{language}}} (Write the entire script in this language. Use 'hi' for Hindi in Devanagari script. Use 'es' for Spanish, 'fr' for French, 'de' for German, all in Latin script.)
 
-**Tone and Style Guidance:**
-*   Adopt a **conversational and engaging human tone** suitable for the requested **{{{tone}}}**. Write as if a real person is speaking naturally to an audience in the specified **{{{language}}}**.
-*   Use language that is accessible and easy to understand for the target language, avoiding overly robotic or formal phrasing unless the requested tone is 'formal'.
-*   Incorporate natural pauses and rhythms of speech through punctuation and sentence structure appropriate for the **{{{language}}}**.
-*   Use contractions (like "don't", "it's", "we're" for English, or colloquialisms for Hindi) where appropriate for a natural flow, unless 'formal' tone is requested.
-*   Aim for a style that is informative yet captivating, making the listener feel involved.
+**Tone and Style Guidance (Crucial for Sounding Human):**
+*   **Embrace Conversational Authenticity:** Adopt a **highly conversational, engaging, and *unmistakably human* tone** suitable for the requested **{{{tone}}}**. Write as if a real person is speaking naturally, perhaps even slightly imperfectly, to an audience in the specified **{{{language}}}**. **AGGRESSIVELY AVOID** robotic, stiff, overly formal, or overly polished phrasing unless the requested tone is explicitly 'professional'. Think "speaking," not "reading."
+*   **Vary Sentence Structure & Rhythm:** Mix short, impactful sentences with longer, more flowing ones. Use sentence fragments occasionally for effect (unless 'professional'). Create a natural cadence; avoid monotonous sentence patterns.
+*   **Natural Pauses & Emphasis:** Use punctuation (commas, ellipses (...), em dashes —) strategically to suggest natural pauses, hesitations, or points of emphasis where a speaker might breathe, think, or stress a word. Write for the ear.
+*   **Contractions & Colloquialisms:** For English, liberally use contractions ("don't", "it's", "we're", "you'll"). For Hindi, Spanish, French, German, integrate common colloquial phrases, idioms, and expressions appropriate for the **{{{tone}}}** (unless 'professional'). This is key to sounding less like written text.
+*   **Interjections & Fillers (Use Sparingly & Appropriately):** For tones like 'conversational', 'friendly', 'enthusiastic', 'humorous', or 'upbeat', consider subtle use of interjections (e.g., "Wow!", "Oh,", "Well,", "¡Claro!", "Bon,", "Also,") or filler words ("you know," "like," "actually," "sort of", "o sea", "en fait", "quasi") *only* if it enhances the natural feel without becoming distracting. Avoid overuse. Not generally suitable for 'professional', 'calm', or 'informative'.
+*   **Direct Address & Rhetorical Questions:** Engage the listener directly (e.g., "Now, you might be thinking...", "¿Te imaginas?", "Alors, qu'est-ce que ça veut dire?", "Was bedeutet das für Sie?"). Use rhetorical questions to guide thought and maintain engagement.
+*   **Active Voice:** Prefer active voice over passive voice for a more direct and engaging style.
 
 **CRITICAL OUTPUT INSTRUCTIONS:**
 1.  **Spoken Words ONLY:** The output MUST contain ONLY the words intended to be spoken aloud by the podcast host in the specified **{{{language}}}**. This output will be fed directly into a text-to-speech (TTS) engine.
 2.  **ABSOLUTELY NO Extra Elements:** Do NOT include any of the following:
-    *   Speaker names (e.g., "Host:", "Guest:")
-    *   Stage directions (e.g., "[upbeat music fades]", "(pauses briefly)", "[sound of typing]")
-    *   Sound effect cues (e.g., "[SFX: door creaks]")
-    *   Titles or headings (e.g., "Podcast Script:", "Introduction", "Section 1", "शीर्षक", "परिचय")
+    *   Speaker names (e.g., "Host:", "Guest:", "Anfitrión:", "Hôte:", "Gastgeber:")
+    *   Stage directions (e.g., "[upbeat music fades]", "(pauses briefly)", "[Klang von Tippen]")
+    *   Sound effect cues (e.g., "[SFX: door creaks]", "[EFX: puerta chirría]")
+    *   Titles or headings (e.g., "Podcast Script:", "Introduction", "Sección 1", "Abschnitt 1", "शीर्षक", "परिचय")
     *   Comments or notes (e.g., "// Remember to emphasize this", "<!-- Check source -->")
     *   Timestamps or section markers (e.g., "[00:30]", "== Section 2 ==")
-    *   Any introductory or concluding remarks *about* the script itself (e.g., "Here is the script:", "End of script.")
+    *   Any introductory or concluding remarks *about* the script itself (e.g., "Here is the script:", "Fin du script.", "Ende des Skripts.")
     *   Any other non-spoken text.
-3.  **Formatting:** Use paragraphs to structure the script for readability. Ensure line breaks occur naturally within the spoken dialogue. For Hindi ('hi'), use Devanagari script ONLY.
+3.  **Formatting:** Use paragraphs to structure the script for readability. Ensure line breaks occur naturally within the spoken dialogue. For Hindi ('hi'), use Devanagari script ONLY. For English ('en'), Spanish ('es'), French ('fr'), and German ('de'), use Latin script ONLY.
 
-Generate the podcast script now, adhering strictly to the keyword, length, tone, language, and **CRITICAL OUTPUT INSTRUCTIONS**. The entire output should be only the spoken words in the correct language and script.`,
+Generate the podcast script now, adhering strictly to the keyword, length, tone, language, and **CRITICAL OUTPUT INSTRUCTIONS**. The entire output should be only the spoken words in the correct language and script, crafted to sound as human and natural as possible.`,
 });
 
 

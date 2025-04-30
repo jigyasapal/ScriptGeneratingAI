@@ -1,4 +1,3 @@
-
 'use client';
 
 import type { ChangeEvent, FormEvent } from 'react';
@@ -13,7 +12,8 @@ import { Slider } from "@/components/ui/slider";
 import { Copy, Download, Loader2, Play, Square, AudioWaveform } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { generateScriptAction, type GenerateScriptActionState } from './actions';
-import type { ScriptLength, EmotionTone, Language } from '@/ai/flows/podcast-script-generation';
+import type { ScriptLength, ConversationTone, Language } from '@/ai/flows/podcast-script-generation'; // Use ConversationTone
+
 
 // Helper function to create a downloadable text file
 const downloadFile = (filename: string, text: string) => {
@@ -28,10 +28,10 @@ const downloadFile = (filename: string, text: string) => {
 
 
 export default function Home() {
-  const { toast, toasts } = useToast();
+  const { toast, toasts } = useToast(); // Removed isActive usage
   const [keyword, setKeyword] = useState('');
   const [selectedLength, setSelectedLength] = useState<ScriptLength>('medium');
-  const [selectedTone, setSelectedTone] = useState<EmotionTone>('neutral');
+  const [selectedTone, setSelectedTone] = useState<ConversationTone>('conversational'); // Use ConversationTone
   const [selectedLanguage, setSelectedLanguage] = useState<Language>('en');
   const [_isPending, startTransition] = useTransition(); // Renamed to avoid conflict
   const formRef = useRef<HTMLFormElement>(null);
@@ -45,9 +45,10 @@ export default function Home() {
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const voiceCheckIntervalRef = useRef<NodeJS.Timeout | null>(null); // Ref for interval
 
-
+  // Define initialState directly with type
   const initialState: GenerateScriptActionState = {};
   const [state, formAction, isFormPending] = useActionState(generateScriptAction, initialState);
+
 
   // --- Voice Loading Effect ---
    useEffect(() => {
@@ -135,8 +136,8 @@ export default function Home() {
         if (voices.length > 0) {
              console.log(`Available voices raw:`, voices.map(v => `${v.name} (${v.lang}) ${v.default ? '[Default]' : ''}`));
 
-             // Filter voices based on the selected language prefix (e.g., 'en' or 'hi')
-             const languagePrefix = selectedLanguage.split('-')[0]; // 'en' or 'hi'
+             // Filter voices based on the selected language prefix (e.g., 'en', 'hi', 'es', 'fr', 'de')
+             const languagePrefix = selectedLanguage.split('-')[0]; // 'en', 'hi', 'es', 'fr', 'de'
              const filteredVoices = voices.filter(voice => voice.lang.startsWith(languagePrefix));
 
              console.log(`Found ${filteredVoices.length} voices for prefix "${languagePrefix}"`);
@@ -168,41 +169,59 @@ export default function Home() {
             if (!currentVoiceIsValidForLanguage && filteredVoices.length > 0) {
                  console.log("Selecting a default voice.");
                  let defaultVoice: SpeechSynthesisVoice | undefined;
+                 let specificLangTag: string;
+
+                // Determine the most likely specific language tag for default search
+                switch (selectedLanguage) {
+                    case 'hi': specificLangTag = 'hi-IN'; break;
+                    case 'es': specificLangTag = 'es-ES'; break; // Defaulting to Spain Spanish
+                    case 'fr': specificLangTag = 'fr-FR'; break; // Defaulting to France French
+                    case 'de': specificLangTag = 'de-DE'; break; // Defaulting to Germany German
+                    case 'en': specificLangTag = 'en-US'; break; // Defaulting to US English
+                    default: specificLangTag = languagePrefix; // Fallback if somehow language is not in the list
+                }
+                 console.log(`Attempting default voice selection for language "${selectedLanguage}", prioritizing tag "${specificLangTag}" and prefix "${languagePrefix}".`);
+
 
                  // --- Prioritization Strategy ---
-                 // 1. Voices explicitly marked as default by the browser *for the specific language tag* (e.g., 'en-US', 'hi-IN')
-                 defaultVoice = filteredVoices.find(v => v.default && v.lang === (selectedLanguage === 'hi' ? 'hi-IN' : 'en-US'));
+                 // 1. Voices explicitly marked as default by the browser *for the specific language tag*
+                 defaultVoice = filteredVoices.find(v => v.default && v.lang === specificLangTag);
                  if(defaultVoice) console.log("Found browser default for specific lang tag:", defaultVoice.name);
 
                  // 2. Google voices for the specific language tag (often high quality)
                  if (!defaultVoice) {
-                    defaultVoice = filteredVoices.find(v => v.name.includes('Google') && v.lang === (selectedLanguage === 'hi' ? 'hi-IN' : 'en-US'));
+                    defaultVoice = filteredVoices.find(v => v.name.includes('Google') && v.lang === specificLangTag);
                     if(defaultVoice) console.log("Found Google voice for specific lang tag:", defaultVoice.name);
                  }
-                 // 3. Other voices for the specific language tag
+                  // 3. Microsoft voices for the specific language tag
+                  if (!defaultVoice) {
+                    defaultVoice = filteredVoices.find(v => v.name.includes('Microsoft') && v.lang === specificLangTag);
+                    if(defaultVoice) console.log("Found Microsoft voice for specific lang tag:", defaultVoice.name);
+                 }
+                 // 4. Other voices for the specific language tag
                  if (!defaultVoice) {
-                    defaultVoice = filteredVoices.find(v => v.lang === (selectedLanguage === 'hi' ? 'hi-IN' : 'en-US'));
+                    defaultVoice = filteredVoices.find(v => v.lang === specificLangTag);
                     if(defaultVoice) console.log("Found other voice for specific lang tag:", defaultVoice.name);
                  }
 
                  // --- Broaden Search if Specific Tag Fails ---
-                 // 4. Browser default for the broader language prefix (e.g., 'en', 'hi')
+                 // 5. Browser default for the broader language prefix (e.g., 'en', 'hi')
                  if (!defaultVoice) {
                     defaultVoice = filteredVoices.find(v => v.default && v.lang.startsWith(languagePrefix));
                      if(defaultVoice) console.log("Found browser default for language prefix:", defaultVoice.name);
                  }
-                 // 5. Google voices for the broader language prefix
+                 // 6. Google voices for the broader language prefix
                  if (!defaultVoice) {
                      defaultVoice = filteredVoices.find(v => v.name.includes('Google') && v.lang.startsWith(languagePrefix));
                      if(defaultVoice) console.log("Found Google voice for language prefix:", defaultVoice.name);
                  }
-                 // 6. Microsoft voices for the broader language prefix
+                 // 7. Microsoft voices for the broader language prefix
                   if (!defaultVoice) {
                      defaultVoice = filteredVoices.find(v => v.name.includes('Microsoft') && v.lang.startsWith(languagePrefix));
                      if(defaultVoice) console.log("Found Microsoft voice for language prefix:", defaultVoice.name);
                  }
 
-                 // 7. Any remaining voice for the language prefix (absolute fallback)
+                 // 8. Any remaining voice for the language prefix (absolute fallback)
                   if (!defaultVoice) {
                       defaultVoice = filteredVoices[0];
                        if(defaultVoice) console.log("Using first available voice as fallback:", defaultVoice.name);
@@ -295,7 +314,8 @@ export default function Home() {
         }
          if (prevState.error && prevState.submittedLanguage !== undefined) {
              const lang = prevState.submittedLanguage;
-             if (['en', 'hi'].includes(lang)) {
+             // Include new languages in the check
+             if (['en', 'hi', 'es', 'fr', 'de'].includes(lang)) {
                setSelectedLanguage(lang);
              }
          }
@@ -318,17 +338,22 @@ export default function Home() {
   };
 
    const handleToneChange = (value: string) => {
-    const validTones: EmotionTone[] = ['neutral', 'happy', 'sad', 'excited', 'formal', 'casual'];
-    if (validTones.includes(value as EmotionTone)) {
-        setSelectedTone(value as EmotionTone);
+    // Use the updated ConversationTone enum
+    const validTones: ConversationTone[] = [
+        'neutral', 'conversational', 'calm', 'friendly', 'professional',
+        'enthusiastic', 'informative', 'humorous', 'empathetic', 'upbeat'
+    ];
+    if (validTones.includes(value as ConversationTone)) {
+        setSelectedTone(value as ConversationTone);
     } else {
-         console.warn(`Invalid tone value received: ${value}. Defaulting to 'neutral'.`);
-        setSelectedTone('neutral');
+         console.warn(`Invalid tone value received: ${value}. Defaulting to 'conversational'.`);
+        setSelectedTone('conversational');
     }
    };
 
    const handleLanguageChange = (value: string) => {
-     const validLanguages: Language[] = ['en', 'hi'];
+     // Include new languages
+     const validLanguages: Language[] = ['en', 'hi', 'es', 'fr', 'de'];
      if (validLanguages.includes(value as Language)) {
          console.log(`Language changed to: ${value}`);
          setSelectedLanguage(value as Language);
@@ -510,7 +535,16 @@ export default function Home() {
         // This *shouldn't* happen if selectedVoiceURI is valid, but handle defensively
         console.warn(`Selected voice URI "${selectedVoiceURI}" not found in the current available voices list for ${selectedLanguage}. Attempting to use browser default based on language.`);
         // Attempt to set language anyway, browser might pick *a* default based on this
-        utterance.lang = selectedLanguage === 'hi' ? 'hi-IN' : 'en-US'; // Use specific locale hint
+         let specificLangTag: string;
+         switch (selectedLanguage) {
+             case 'hi': specificLangTag = 'hi-IN'; break;
+             case 'es': specificLangTag = 'es-ES'; break;
+             case 'fr': specificLangTag = 'fr-FR'; break;
+             case 'de': specificLangTag = 'de-DE'; break;
+             case 'en': specificLangTag = 'en-US'; break;
+             default: specificLangTag = selectedLanguage;
+         }
+         utterance.lang = specificLangTag; // Use specific locale hint
         const toastId = 'voice-not-found-playback-warning';
          if (!toasts.some(t => t.id === toastId)) { // Check if toast is already active
             toast({
@@ -726,6 +760,9 @@ export default function Home() {
                         <SelectContent className="rounded-md shadow-lg">
                             <SelectItem value="en" className="cursor-pointer">English</SelectItem>
                             <SelectItem value="hi" className="cursor-pointer">Hindi (हिन्दी)</SelectItem>
+                            <SelectItem value="es" className="cursor-pointer">Spanish (Español)</SelectItem>
+                            <SelectItem value="fr" className="cursor-pointer">French (Français)</SelectItem>
+                            <SelectItem value="de" className="cursor-pointer">German (Deutsch)</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -748,18 +785,23 @@ export default function Home() {
 
                  {/* Tone Selection */}
                  <div className="space-y-2">
-                    <Label htmlFor="tone-select" className="font-semibold text-foreground">Emotion Tone</Label>
+                    <Label htmlFor="tone-select" className="font-semibold text-foreground">Conversation Tone</Label>
                     <Select value={selectedTone} onValueChange={handleToneChange} disabled={isLoading} name="tone">
                         <SelectTrigger id="tone-select" className="w-full rounded-md shadow-sm" aria-label="Select script tone">
                         <SelectValue placeholder="Select tone..." />
                         </SelectTrigger>
                         <SelectContent className="rounded-md shadow-lg">
+                            {/* Updated Tone Options */}
+                            <SelectItem value="conversational" className="cursor-pointer">Conversational</SelectItem>
+                            <SelectItem value="calm" className="cursor-pointer">Calm</SelectItem>
+                            <SelectItem value="friendly" className="cursor-pointer">Friendly</SelectItem>
+                            <SelectItem value="professional" className="cursor-pointer">Professional</SelectItem>
+                            <SelectItem value="enthusiastic" className="cursor-pointer">Enthusiastic</SelectItem>
+                            <SelectItem value="informative" className="cursor-pointer">Informative</SelectItem>
+                            <SelectItem value="humorous" className="cursor-pointer">Humorous</SelectItem>
+                            <SelectItem value="empathetic" className="cursor-pointer">Empathetic</SelectItem>
+                            <SelectItem value="upbeat" className="cursor-pointer">Upbeat</SelectItem>
                             <SelectItem value="neutral" className="cursor-pointer">Neutral</SelectItem>
-                            <SelectItem value="happy" className="cursor-pointer">Happy</SelectItem>
-                            <SelectItem value="sad" className="cursor-pointer">Sad</SelectItem>
-                            <SelectItem value="excited" className="cursor-pointer">Excited</SelectItem>
-                            <SelectItem value="formal" className="cursor-pointer">Formal</SelectItem>
-                            <SelectItem value="casual" className="cursor-pointer">Casual</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -931,5 +973,3 @@ export default function Home() {
     </main>
   );
 }
-
-    

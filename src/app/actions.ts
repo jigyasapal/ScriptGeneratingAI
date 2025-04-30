@@ -4,7 +4,7 @@ import {
   generatePodcastScript,
   type GeneratePodcastScriptInput,
   type ScriptLength,
-  type EmotionTone, // Import EmotionTone
+  type ConversationTone, // Import ConversationTone
   type Language,    // Import Language
 } from '@/ai/flows/podcast-script-generation';
 import {z} from 'genkit';
@@ -13,8 +13,19 @@ import {z} from 'genkit';
 const GenerateScriptInputSchema = z.object({
   keyword: z.string().min(1, {message: 'Keyword cannot be empty.'}),
   length: z.enum(['short', 'medium', 'long', 'hour']).default('medium'), // Add 'hour'
-  tone: z.enum(['neutral', 'happy', 'sad', 'excited', 'formal', 'casual']).default('neutral'), // Add tone
-  language: z.enum(['en', 'hi']).default('en'), // Add language
+  tone: z.enum([
+        'neutral',
+        'conversational',
+        'calm',
+        'friendly',
+        'professional',
+        'enthusiastic',
+        'informative',
+        'humorous',
+        'empathetic',
+        'upbeat'
+    ]).default('conversational'), // Updated tone enum
+  language: z.enum(['en', 'hi', 'es', 'fr', 'de']).default('en'), // Add es, fr, de
 });
 
 export interface GenerateScriptActionState {
@@ -22,7 +33,7 @@ export interface GenerateScriptActionState {
   error?: string;
   submittedKeyword?: string;
   submittedLength?: ScriptLength;
-  submittedTone?: EmotionTone; // Add submitted tone
+  submittedTone?: ConversationTone; // Use ConversationTone
   submittedLanguage?: Language; // Add submitted language
 }
 
@@ -33,7 +44,7 @@ export async function generateScriptAction(
   const validatedFields = GenerateScriptInputSchema.safeParse({
     keyword: formData.get('keyword'),
     length: (formData.get('length') as ScriptLength) || 'medium',
-    tone: (formData.get('tone') as EmotionTone) || 'neutral', // Get tone from form, default if missing
+    tone: (formData.get('tone') as ConversationTone) || 'conversational', // Get tone from form, default if missing
     language: (formData.get('language') as Language) || 'en', // Get language from form, default if missing
   });
 
@@ -49,7 +60,7 @@ export async function generateScriptAction(
       error: error || 'Invalid input.', // Fallback error message
       submittedKeyword: formData.get('keyword') as string,
       submittedLength: (formData.get('length') as ScriptLength) || 'medium',
-      submittedTone: (formData.get('tone') as EmotionTone) || 'neutral',
+      submittedTone: (formData.get('tone') as ConversationTone) || 'conversational',
       submittedLanguage: (formData.get('language') as Language) || 'en',
     };
   }
