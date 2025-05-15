@@ -1,74 +1,41 @@
-# Podcast Pilot (Firebase Studio Project)
+# Podcast Pilot
 
 This is a Next.js application built in Firebase Studio that allows you to generate podcast scripts using AI, listen to them with text-to-speech, and customize various aspects of the script and playback.
+This Next.js application uses Genkit and the Google AI plugin to generate podcast scripts based on user-provided keywords, length, tone, and language preferences. It leverages the browser's built-in Speech Synthesis API for text-to-speech playback and offers options to customize the voice and font size.
 
-To get started with development, take a look at `src/app/page.tsx`.
+# Working
+AI-Powered Script Generation (Genkit & Google AI):
+Genkit orchestrates the AI flow, taking user inputs and feeding them to the Google AI model (Gemini).
+A prompt is defined to instruct the AI model on how to generate a podcast script, emphasizing a natural, human-like tone. The prompt includes the keyword, desired script length, tone, and language.
+The Google AI model generates a script based on the prompt.
+The generated script is validated against a schema to ensure it conforms to the expected format.
 
-## Running Locally
+User Interface (Next.js & Shadcn UI):
+Next.js provides the full-stack framework for building the user interface.
+The UI includes input fields for the keyword, and dropdowns to select the desired script length, tone, and language.
+A "Generate Script" button triggers the script generation process.
+The generated script is displayed in a textarea element.
+Controls are provided to play the script using text-to-speech, copy the script to the clipboard, and download the script as a text file.
 
-1.  **Install dependencies:**
-    ```bash
-    npm install
-    # or
-    yarn install
-    # or
-    pnpm install
-    ```
+Text-to-Speech Playback (Web Speech API):
+The browser's built-in Speech Synthesis API is used to read the generated script aloud.
+Users can select a voice from the available voices on their system.
+The application handles voice selection, language settings, and error conditions.
+Playback can be started and stopped using a play/stop button.
 
-2.  **Set up Environment Variables:**
-    Create a `.env.local` file in the root of your project and add your Google Generative AI API key:
-    ```env
-    GOOGLE_GENAI_API_KEY=YOUR_API_KEY_HERE
-    ```
+Form Handling (Server Actions):
+Next.js Server Actions are used to handle form submissions and interact with the Genkit AI flow.
+The generateScriptAction function validates the user inputs and calls the generatePodcastScript function from the AI flow.
+The action returns the generated script or any error messages to the client.
 
-3.  **Run the development server:**
-    ```bash
-    npm run dev
-    # or
-    yarn dev
-    # or
-    pnpm dev
-    ```
-    The application will typically be available at `http://localhost:9002`.
+State Management (React Hooks):
+useState is used to manage the input field values, selected script length, tone, language, voice, and font size.
+useTransition is used to manage the loading state during script generation.
+useRef is used to store references to the audio context and audio buffer.
+useActionState is used to manage the form state and handle server action responses.
 
-4.  **Run Genkit (for AI flow development, in a separate terminal):**
-    ```bash
-    npm run genkit:watch
-    ```
+Styling (Tailwind CSS):
+Tailwind CSS is used to style the user interface components.
+Custom CSS variables are defined to control the color scheme and other visual aspects of the application.
 
-## Version Control with Git & GitHub
 
-To manage your project with Git and host it on GitHub:
-
-1.  **Initialize a Git repository (if you haven't already):**
-    ```bash
-    git init
-    ```
-
-2.  **Stage your files:**
-    The `.gitignore` file (included in this project) will ensure that unnecessary files like `node_modules` are not tracked.
-    ```bash
-    git add .
-    ```
-
-3.  **Make your first commit:**
-    ```bash
-    git commit -m "Initial commit"
-    ```
-
-4.  **Create a repository on GitHub:**
-    Go to [GitHub](https://github.com) and create a new repository. Do *not* initialize it with a README, .gitignore, or license if you plan to push this existing repository.
-
-5.  **Link your local repository to the GitHub remote:**
-    Replace `<YOUR_USERNAME>` and `<YOUR_REPOSITORY_NAME>` with your actual GitHub username and repository name.
-    ```bash
-    git remote add origin https://github.com/<YOUR_USERNAME>/<YOUR_REPOSITORY_NAME>.git
-    ```
-
-6.  **Push your local changes to GitHub:**
-    ```bash
-    git push -u origin main
-    # Or 'master' if your default branch is named master
-    ```
-
-Now your project code is on GitHub! You can continue to commit and push changes as you develop your application.
